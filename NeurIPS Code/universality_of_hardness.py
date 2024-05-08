@@ -1,3 +1,4 @@
+import random
 from typing import List
 
 import matplotlib.pyplot as plt
@@ -98,10 +99,10 @@ def main():
         plot_samples(images, labels, f'{key}_low_confidence')
 
     thresholds = range(1, 101, 1)
-    consensus_thresholds = range(3, 23, 4)  # Starting at 3 and increasing in steps of 4 up to 19
-    overlaps = {'train': {c: [] for c in consensus_thresholds},
-                'test': {c: [] for c in consensus_thresholds},
-                'combined': {c: [] for c in consensus_thresholds}}
+    number_of_models = range(3, 23, 4)  # Starting at 3 and increasing in steps of 4 up to 19
+    overlaps = {'train': {n: [] for n in number_of_models},
+                'test': {n: [] for n in number_of_models},
+                'combined': {n: [] for n in number_of_models}}
 
     for pct in tqdm(thresholds):
         num_train = int(len(trainset) * pct / 100)
@@ -109,36 +110,45 @@ def main():
         num_combined = int((len(trainset) + len(testset)) * pct / 100)
 
         for key in ['train', 'test', 'combined']:
-            low_conf_sets = []
-            for confidences in model_confidences[key]:
-                indices = torch.topk(torch.tensor(confidences),
-                                     num_train if key == 'train' else num_test if key == 'test' else num_combined,
-                                     largest=False).indices
-                low_conf_sets.append(set(indices.numpy()))
-            dataset_size = len(trainset) if key == 'train' else len(testset) if key == 'test' else \
-                len(trainset) + len(testset)
-            overlap_count = np.zeros(dataset_size)
-            for c_threshold in consensus_thresholds:
-                overlap_count.fill(0)
-                for lc_set in low_conf_sets:
-                    overlap_count[list(lc_set)] += 1
-                overlap_size = num_train if key == 'train' else num_test if key == 'test' else num_combined
-                overlap1 = (np.sum(overlap_count >= c_threshold) / overlap_size) * 100
-                overlaps[key][c_threshold].append(overlap1)
-
+            for c_threshold in number_of_models:
+                overlap_measurements = []  # List to store multiple overlap measurements
+                for _ in range(100):
+                    # Randomly choose c_threshold models
+                    selected_model_indices = random.sample(range(len(model_confidences[key])), c_threshold)
+                    low_conf_sets = []
+                    # Collect lowest confidence indices from selected models
+                    for model_index in selected_model_indices:
+                        confidences = model_confidences[key][model_index]
+                        indices = torch.topk(torch.tensor(confidences),
+                                             num_train if key == 'train' else num_test if key == 'test'
+                                             else num_combined, largest=False).indices
+                        low_conf_sets.append(set(indices.numpy()))
+                    # Calculate the intersection of all low confidence sets
+                    common_indices = set.intersection(*low_conf_sets)
+                    overlap_percentage = (len(common_indices) / (
+                        num_train if key == 'train' else num_test if key == 'test' else num_combined)) * 100
+                    overlap_measurements.append(overlap_percentage)
+                # Store the mean and standard deviation of the overlap measurements
+                overlaps[key][c_threshold].append((np.mean(overlap_measurements), np.std(overlap_measurements)))
+    # Plotting the results
     plt.figure(figsize=(12, 8))
     for i, key in enumerate(['train', 'test', 'combined']):
         plt.subplot(1, 3, i + 1)
-        for c_threshold in consensus_thresholds:
-            plt.plot(thresholds, overlaps[key][c_threshold], label=f'Min {c_threshold} Networks')
+        for c_threshold in number_of_models:
+            means = [x[0] for x in overlaps[key][c_threshold]]
+            stds = [x[1] for x in overlaps[key][c_threshold]]
+            plt.plot(thresholds, means, label=f'Consensus of {c_threshold} Models')
+            plt.fill_between(thresholds, [m - s for m, s in zip(means, stds)], [m + s for m, s in zip(means, stds)],
+                             alpha=0.2)
+
         plt.title(f'{key.capitalize()} Set Overlap')
         plt.xlabel('Threshold (%)')
         plt.ylabel('Overlap (%)')
         plt.grid(True)
         plt.legend()
     plt.tight_layout()
-    plt.savefig('universality_of_hardness.pdf')
-    plt.savefig('universality_of_hardness.png')
+    plt.savefig('universality_of_hardness_mean_std.pdf')
+    plt.savefig('universality_of_hardness_mean_std.png')
     plt.show()
 
 
