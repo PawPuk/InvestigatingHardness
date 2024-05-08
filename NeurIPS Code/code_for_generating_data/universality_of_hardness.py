@@ -1,7 +1,7 @@
+import pickle
 import random
 from typing import List
 
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
@@ -35,19 +35,6 @@ def get_confidence_scores(model, dataloader, device) -> List:
     return confidences
 
 
-def plot_samples(data, labels, title):
-    class_names = ['plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck']
-    fig, axes = plt.subplots(1, 10, figsize=(20, 2))
-    for i, ax in enumerate(axes):
-        ax.imshow(data[i].permute(1, 2, 0) * torch.tensor([0.247, 0.243, 0.261]) +
-                  torch.tensor([0.4914, 0.4822, 0.4465]))
-        ax.title.set_text(f'{class_names[labels[i]]}')  # Use class names instead of label numbers
-        ax.axis('off')
-    plt.savefig(f'{title}.png')
-    plt.savefig(f'{title}.pdf')
-    plt.show()
-
-
 def main():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     models = [
@@ -63,6 +50,14 @@ def main():
         'test': [],
         'combined': []
     }
+    results = {
+        'confidences': {},
+        'images': {},
+        'labels': {},
+        'thresholds': {},
+        'number_of_models': {},
+        'overlaps': {}
+    }
 
     for model_name in models:
         model = torch.hub.load("chenyaofo/pytorch-cifar-models", f"cifar10_{model_name}", pretrained=True)
@@ -76,9 +71,9 @@ def main():
         model_confidences['train'].append(np.array(train_confidences))
         model_confidences['test'].append(np.array(test_confidences))
         model_confidences['combined'].append(np.array(combined_confidences))
-
     # Find the hardest samples and plot them
     for key in ['train', 'test', 'combined']:
+        results['confidences'] = model_confidences
         # Average confidences across all models for each sample
         all_confidences = np.stack([confidences for confidences in model_confidences[key]])
         average_confidences = np.mean(all_confidences, axis=0)  # Calculate mean across models (column-wise)
@@ -95,15 +90,16 @@ def main():
             # Correct handling for combined set
             images = [trainset[i][0] if i < len(trainset) else testset[i - len(trainset)][0] for i in selected_samples]
             labels = [trainset[i][1] if i < len(trainset) else testset[i - len(trainset)][1] for i in selected_samples]
-
-        plot_samples(images, labels, f'{key}_low_confidence')
+        results['images'][key] = images
+        results['labels'][key] = labels
 
     thresholds = range(1, 101, 1)
     number_of_models = range(3, 23, 4)  # Starting at 3 and increasing in steps of 4 up to 19
     overlaps = {'train': {n: [] for n in number_of_models},
                 'test': {n: [] for n in number_of_models},
                 'combined': {n: [] for n in number_of_models}}
-
+    results['thresholds'] = thresholds
+    results['number_of_models'] = number_of_models
     for pct in tqdm(thresholds):
         num_train = int(len(trainset) * pct / 100)
         num_test = int(len(testset) * pct / 100)
@@ -130,26 +126,9 @@ def main():
                     overlap_measurements.append(overlap_percentage)
                 # Store the mean and standard deviation of the overlap measurements
                 overlaps[key][c_threshold].append((np.mean(overlap_measurements), np.std(overlap_measurements)))
-    # Plotting the results
-    plt.figure(figsize=(12, 8))
-    for i, key in enumerate(['train', 'test', 'combined']):
-        plt.subplot(1, 3, i + 1)
-        for c_threshold in number_of_models:
-            means = [x[0] for x in overlaps[key][c_threshold]]
-            stds = [x[1] for x in overlaps[key][c_threshold]]
-            plt.plot(thresholds, means, label=f'Consensus of {c_threshold} Models')
-            plt.fill_between(thresholds, [m - s for m, s in zip(means, stds)], [m + s for m, s in zip(means, stds)],
-                             alpha=0.2)
-
-        plt.title(f'{key.capitalize()} Set Overlap')
-        plt.xlabel('Threshold (%)')
-        plt.ylabel('Overlap (%)')
-        plt.grid(True)
-        plt.legend()
-    plt.tight_layout()
-    plt.savefig('universality_of_hardness_mean_std.pdf')
-    plt.savefig('universality_of_hardness_mean_std.png')
-    plt.show()
+    results['overlaps'] = overlaps
+    with open('../Results/results1.pkl', 'wb') as f:
+        pickle.dump(results, f)
 
 
 if __name__ == "__main__":
