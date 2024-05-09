@@ -29,12 +29,26 @@ def load_results(filename):
         return pickle.load(f)
 
 
-def identify_hard_samples(confidences: List[array], threshold: float) -> Tuple[Set[int], Set[int]]:
+def identify_hard_samples_based_on_average_confidence(confidences: List[array],
+                                                      threshold: float) -> Tuple[Set[int], Set[int]]:
     """Divide the CIFAR10 dataset into the easy and hard ('threshold' percent of the dataset) samples."""
     all_confidences = np.stack(confidences)
     average_confidences = np.mean(all_confidences, axis=0)
     sorted_indices = np.argsort(average_confidences)  # This sorts from lowest to highest
     hard_sample_indices = set(sorted_indices[:int(threshold*len(confidences[0]))])
+    easy_sample_indices = set([x for x in range(len(confidences[0]))]).difference(hard_sample_indices)
+    return easy_sample_indices, hard_sample_indices
+
+
+def identify_hard_samples(confidences: List[array], threshold: float) -> Tuple[Set[int], Set[int]]:
+    """Divide the CIFAR10 dataset into the easy and hard ('threshold' percent of the dataset) samples."""
+    low_conf_sets = []
+    # Collect lowest confidence indices from selected models
+    for model_index in [0, 1, 2, 3]:
+        indices = torch.topk(torch.tensor(confidences[model_index]), int(len(confidences[0]) * threshold)).indices
+        low_conf_sets.append(set(indices.numpy()))
+    # Calculate the intersection of all low confidence sets
+    hard_sample_indices = set.intersection(*low_conf_sets)
     easy_sample_indices = set([x for x in range(len(confidences[0]))]).difference(hard_sample_indices)
     return easy_sample_indices, hard_sample_indices
 
