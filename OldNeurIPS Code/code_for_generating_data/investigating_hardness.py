@@ -5,19 +5,19 @@ from typing import List, Set, Tuple
 import numpy as np
 from numpy import array
 import torch
-from torch.optim import Adam
+from torch.optim import Adam, SGD
 from torch.utils.data import DataLoader, Dataset, TensorDataset
 from torchmetrics import Accuracy, Precision, Recall, F1Score
 import torchvision
 from torchvision import datasets, transforms
 from tqdm import tqdm
 
-from neural_network import BasicBlock, ResNet, OldSimpleNN
+from neural_network import BasicBlock, ResNet, SimpleNN, OldSimpleNN
 
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 CRITERION = torch.nn.CrossEntropyLoss()
-EPOCHS = 500
+EPOCHS = 100
 np.random.seed(42)
 torch.manual_seed(42)
 if torch.cuda.is_available():
@@ -56,31 +56,15 @@ def identify_hard_samples_based_on_overlap(confidences: List[List[array]],
 
 def identify_hard_samples(confidences: List[Tuple[int, float]], threshold: float) -> Tuple[Set[int], Set[int]]:
     """Divide the CIFAR10 dataset into the easy and hard ('threshold' percent of the dataset) samples."""
-    confidences = confidences[0]
-    # Corrected list comprehension to directly unpack index and confidence
     confidence_indices = [(confidence, index) for index, confidence in confidences]
 
     # Sort the list by confidence in ascending order to find the most uncertain samples
     sorted_confidence_indices = sorted(confidence_indices, key=lambda x: x[0], reverse=False)
 
     # Select the indices of the hard and easy samples based on the threshold
-    num_hard_samples = int(threshold * len(confidences))
+    num_hard_samples = int(0.05 * len(confidences))
     hard_sample_indices = {index for _, index in sorted_confidence_indices[:num_hard_samples]}
     easy_sample_indices = {index for _, index in sorted_confidence_indices[num_hard_samples:]}
-
-    # Calculate average, min, and max confidences for hard and easy samples
-    hard_confidences = [confidence for confidence, index in sorted_confidence_indices[:num_hard_samples]]
-    easy_confidences = [confidence for confidence, index in sorted_confidence_indices[num_hard_samples:]]
-
-    print("Hard Samples:")
-    print("Average Confidence:", np.mean(hard_confidences))
-    print("Minimum Confidence:", np.min(hard_confidences))
-    print("Maximum Confidence:", np.max(hard_confidences))
-
-    print("Easy Samples:")
-    print("Average Confidence:", np.mean(easy_confidences))
-    print("Minimum Confidence:", np.min(easy_confidences))
-    print("Maximum Confidence:", np.max(easy_confidences))
 
     return hard_sample_indices, easy_sample_indices
 
@@ -128,17 +112,12 @@ def split_data(dataset_name: str, dataset: Dataset, hard_samples: Set[int], easy
     """Use the indices from 'easy_samples' and 'hard_samples' to divide the dataset into training and test set. Before
     creating a DataLoader remove sample_removal_rate hard/easy (depending on the 'remove_hard' flag) samples from the
     training set. Note that for test set we give 3 DataLoaders - one for easy samples, one for hard, and one for all."""
-    # Randomly shuffle hard and easy samples
-    hard_perm, easy_perm = torch.randperm(torch.tensor(list(hard_samples)).size(0)), \
-        torch.randperm(torch.tensor(list(easy_samples)).size(0))
-    if dataset_name == 'CIFAR':
-        hard_data, hard_target = dataset[:][0][hard_perm].squeeze(1), dataset[:][1][hard_perm]
-        easy_data, easy_target = dataset[:][0][easy_perm].squeeze(1), dataset[:][1][easy_perm]
-    else:
-        hard_data, hard_target = dataset[:][0][hard_perm], dataset[:][1][hard_perm]
-        easy_data, easy_target = dataset[:][0][easy_perm], dataset[:][1][easy_perm]
+    hard_data, hard_target = dataset[:][0], dataset[:][1]
+    easy_data, easy_target = dataset[:][0], dataset[:][1]
+    print(hard_data.shape, hard_target.shape)
     # Split hard and easy samples into train and test sets (use 80:20 training:test ratio)
     train_size_hard, train_size_easy = int(len(hard_data) * 0.8), int(len(easy_data) * 0.8)
+    print(train_size_hard, train_size_easy)
     hard_train_data, hard_test_data = hard_data[:train_size_hard], hard_data[train_size_hard:]
     hard_train_target, hard_test_target = hard_target[:train_size_hard], hard_target[train_size_hard:]
     easy_train_data, easy_test_data = easy_data[:train_size_easy], easy_data[train_size_easy:]
@@ -147,8 +126,6 @@ def split_data(dataset_name: str, dataset: Dataset, hard_samples: Set[int], easy
     train_data = torch.cat((hard_train_data, easy_train_data), dim=0)
     train_targets = torch.cat((hard_train_target, easy_train_target), dim=0)
     # Shuffle the final train dataset
-    train_permutation = torch.randperm(train_data.size(0))
-    train_data, train_targets = train_data[train_permutation], train_targets[train_permutation]
     train_loader = DataLoader(TensorDataset(train_data, train_targets), batch_size=len(train_data))
     # Create two test sets - one containing only hard samples, and the other only easy samples
     hard_and_easy_test_sets = [(hard_test_data, hard_test_target), (easy_test_data, easy_test_target)]
@@ -162,13 +139,20 @@ def split_data(dataset_name: str, dataset: Dataset, hard_samples: Set[int], easy
     return train_loader, test_loaders
 
 
-def initialize_model(dataset_name: str) -> Tuple[torch.nn.Module, Adam]:
-    if dataset_name == 'CIFAR':
-        model = ResNet(BasicBlock, [3, 3, 3, 3]).to(DEVICE)
-    else:
-        model =OldSimpleNN(20, 2).to(DEVICE)
+def initialize_model(latent: int = 1, evaluation_network: str = 'SimpleNN',
+                     dataset: str = 'MNIST') -> Tuple[SimpleNN, SGD]:
+    """ Used to initialize the model and optimizer.
 
-    optimizer = Adam(model.parameters(), lr=0.001, weight_decay=1e-2)
+    :param latent: the index of the hidden layer used to extract the latent representation for radii computations
+    :param evaluation_network: specifies the type of network to initialize
+    :param dataset: specifies which dataset will the model be trained on (needed to set input & output layer)
+    :return: initialized SimpleNN model and SGD optimizer
+    """
+    if dataset in ['MNIST', 'FashionMNIST', 'KMNIST']:
+        model = SimpleNN(28 * 28, 2, 20, 1).to(DEVICE)
+    else:
+        model = SimpleNN(3*32*32, 8, 30, latent).to(DEVICE)
+    optimizer = SGD(model.parameters(), lr=0.1)
     return model, optimizer
 
 
@@ -247,9 +231,23 @@ def save_data(data, file_name):
 
 
 def main(threshold: float, dataset_name: str, sample_removal_rates: List[float], remove_hard: bool, runs: int):
-    results = load_results(f'../Results/{dataset_name}_1_metrics.pkl')
-    hard_samples, easy_samples = identify_hard_samples(results, threshold)
+    results = []
     dataset = load_dataset(dataset_name)
+    model, optimizer = initialize_model()
+    loader = torch.utils.data.DataLoader(dataset, batch_size=len(dataset), shuffle=False)
+    for data, target in loader:  # This is done to increase the speed (works due to full-batch setting)
+        loader = DataLoader(TensorDataset(data, target), batch_size=len(data), shuffle=False)
+    train('MNIST', model, loader, optimizer)
+    model.eval()
+    # Iterate through the data samples in 'loader'; compute and save their confidence/energy (depending on 'strategy')
+    with torch.no_grad():
+        for data, target in loader:
+            data, target = data.to(DEVICE), target.to(DEVICE)
+            output = model(data)
+            confidence = output.max(1)[0].cpu().numpy()
+            results.extend(list(zip(range(len(dataset)), confidence)))
+    # results = load_results(f'../Results/{dataset_name}_1_metrics.pkl')
+    hard_samples, easy_samples = identify_hard_samples(results, threshold)
     metrics = {setting: {sample_removal_rate: {metric: []
                                                for metric in ['accuracy', 'precision', 'recall', 'f1']}
                          for sample_removal_rate in sample_removal_rates}
@@ -258,7 +256,7 @@ def main(threshold: float, dataset_name: str, sample_removal_rates: List[float],
         train_loader, test_loaders = split_data(dataset_name, dataset, hard_samples, easy_samples, sample_removal_rate,
                                                 remove_hard)
         for _ in range(runs):
-            model, optimizer = initialize_model(dataset_name)
+            model, optimizer = initialize_model()
             train(dataset_name, model, train_loader, optimizer)
             # Evaluate the model on test set
             for i, setting in enumerate(['full', 'hard', 'easy']):
@@ -274,7 +272,7 @@ def main(threshold: float, dataset_name: str, sample_removal_rates: List[float],
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='Script to investigate the impact of reducing hard/easy samples on generalisation.')
-    parser.add_argument('--threshold', type=float, default=0.05,
+    parser.add_argument('--threshold', type=float, default=0.025,
                         help='')
     parser.add_argument('--dataset_name', type=str, default='MNIST', choices=['MNIST', 'CIFAR'])
     parser.add_argument('--sample_removal_rates', nargs='+', type=float,
