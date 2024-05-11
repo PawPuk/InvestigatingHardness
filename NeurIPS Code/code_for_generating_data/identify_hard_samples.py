@@ -5,13 +5,12 @@ from typing import Tuple
 import numpy as np
 import torch
 from torch.optim import Adam
-from torch.utils.data import DataLoader, ConcatDataset
+from torch.utils.data import DataLoader, TensorDataset
 from torchmetrics import Accuracy, Precision, Recall, F1Score
-import torchvision
-from torchvision import transforms
+from torchvision import datasets, transforms
 from tqdm import tqdm
 
-from neural_network import BasicBlock, ResNet
+from neural_network import BasicBlock, ResNet, OldSimpleNN
 
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -23,66 +22,84 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed_all(42)
 
 
-def load_CIFAR10() -> Tuple[DataLoader, DataLoader, DataLoader]:
-    """Load and normalize the CIFAR-10 dataset."""
-    # Define transformations for the dataset
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261))
-    ])
+def load_dataset(flag: str) -> DataLoader:
+    """Load either CIFAR10 or MNIST dataset based on the 'flag'."""
+    if flag == 'CIFAR':
+        dataset_class = datasets.CIFAR10
+    elif flag == 'MNIST':
+        dataset_class = datasets.MNIST
+    else:
+        raise ValueError("Unsupported dataset flag!")
 
-    # Load the CIFAR10 training and test datasets with the specified transforms
-    train_dataset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
-    test_dataset = torchvision.datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
-    combined_dataset = ConcatDataset([train_dataset, test_dataset])
+    # Load the datasets
+    train_dataset = dataset_class(root='./data', train=True, download=True,
+                                  transform=transforms.ToTensor())
+    test_dataset = dataset_class(root='./data', train=False, download=True,
+                                 transform=transforms.ToTensor())
 
-    # Concatenate train and test datasets if needed or handle separately
-    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
-    combined_loader = DataLoader(combined_dataset, batch_size=64, shuffle=False)
+    # Concatenate train and test datasets
+    full_data = torch.cat([train_dataset.data.unsqueeze(1).float(), test_dataset.data.unsqueeze(1).float()])
+    full_targets = torch.cat([train_dataset.targets, test_dataset.targets])
 
-    return train_loader, test_loader, combined_loader
+    """ # Shuffle the combined dataset
+    np.random.seed(42)
+    shuffled_indices = np.random.permutation(len(full_data))
+    full_data, full_targets = full_data[torch.tensor(shuffled_indices)], full_targets[torch.tensor(shuffled_indices)]"""
+
+    # Normalize the data
+    data_mean = full_data.mean(dim=(0, 2, 3)) / 255.0
+    # data_std = full_data.std(dim=(0, 2, 3)) / 255.0
+    data_std = torch.sqrt(torch.var(full_data, dim=(0, 2, 3)) / 255.0 ** 2 + 0.0000001)
+    normalize_transform = transforms.Normalize(mean=data_mean.tolist(), std=data_std.tolist())
+    full_data = normalize_transform(full_data / 255.0)  # Ensure scaling to [0, 1] before normalization
+    return DataLoader(TensorDataset(full_data, full_targets), batch_size=len(full_data), shuffle=False)
 
 
-def initialize_model() -> Tuple[ResNet, Adam]:
-    model = ResNet(BasicBlock, [3, 3, 3, 3]).to(DEVICE)
-    optimizer = Adam(model.parameters(), lr=0.001, weight_decay=1e-4)
+def initialize_model(dataset_name: str) -> Tuple[torch.nn.Module, Adam]:
+    if dataset_name == 'CIFAR':
+        model = ResNet(BasicBlock, [3, 3, 3, 3]).to(DEVICE)
+    else:
+        model = OldSimpleNN(20, 2).to(DEVICE)
+
+    optimizer = Adam(model.parameters(), lr=0.001, weight_decay=1e-2)
     return model, optimizer
 
 
-def train(model: ResNet, loader: DataLoader, optimizer: Adam):
-    for epoch in range(100):
-        # Adjust the learning rate
-        lr = 0.001 * (0.1 ** (epoch // 30))
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = lr
+def train(dataset: str, model: torch.nn.Module, loader: DataLoader, optimizer: Adam):
+    for epoch in tqdm(range(500), desc='Epochs'):
+        if dataset == 'CIFAR':
+            # Adjust the learning rate
+            lr = 0.001 * (0.1 ** (epoch // 30))
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = lr
         # Proceed with training
         model.train()
-        running_loss = 0.0
-        for i, data in enumerate(loader):
-            inputs, labels = data[0].to(DEVICE), data[1].to(DEVICE)
+        for data, target in loader:
+            inputs, labels = data.to(DEVICE), target.to(DEVICE)
             optimizer.zero_grad()
             outputs = model(inputs)
             loss = CRITERION(outputs, labels)
             loss.backward()
             optimizer.step()
-            running_loss += loss.item()
 
 
-def compute_confidences(model, loader):
+def compute_confidences(model: torch.nn.Module, loader: DataLoader):
     """Compute model confidences on the combined CIFAR10 dataset."""
-    model.eval()
     confidences = []
+    model.eval()
     with torch.no_grad():
-        for inputs, _ in loader:
-            inputs = inputs.to(DEVICE)
-            outputs = model(inputs)
-            probabilities = torch.nn.functional.softmax(outputs, dim=1)
-            confidences.extend(probabilities.cpu().numpy())  # Store probabilities
+        for data, _ in loader:
+            print(data.shape)
+            data = data.to(DEVICE)
+            outputs = model(data)
+            confidence = outputs.max(1)[0].cpu().numpy()
+            confidences.extend(list(zip(range(data.shape[0]), confidence)))
+            # probabilities = torch.nn.functional.softmax(outputs, dim=1)
+            # confidences.extend(probabilities.cpu().numpy())  # Store probabilities
     return confidences
 
 
-def test(model: ResNet, loader: DataLoader) -> dict[str, float]:
+def test(model: torch.nn.Module, loader: DataLoader) -> dict[str, float]:
     """ Measures the accuracy of the 'model' on the test set.
 
     :param model: model, which performance we want to evaluate
@@ -113,28 +130,28 @@ def test(model: ResNet, loader: DataLoader) -> dict[str, float]:
     return {'accuracy': accuracy_result, 'precision': precision_result, 'recall': recall_result, 'f1': f1_result}
 
 
-def save_data(data, file_name):
+def save_data(data, file_name: str):
     with open(file_name, 'wb') as f:
         pickle.dump(data, f)
 
 
-def main(runs: int):
-    train_loader, test_loader, combined_loader = load_CIFAR10()
+def main(dataset: str, runs: int):
+    full_loader = load_dataset(dataset)
     all_confidences = []
     for _ in tqdm(range(runs)):
-        model, optimizer = initialize_model()
-        train(model, train_loader, optimizer)
-        confidences = compute_confidences(model, combined_loader)
+        model, optimizer = initialize_model(dataset)
+        train(dataset, model, full_loader, optimizer)
+        confidences = compute_confidences(model, full_loader)
         all_confidences.append(confidences)
-        # Evaluate the model on test set
-        current_metrics = test(model, test_loader)
+        current_metrics = test(model, full_loader)
         print(current_metrics['accuracy'])
-    save_data(all_confidences, f"../Results/{runs}_metrics.pkl")
+    save_data(all_confidences, f"../Results/{dataset}_{runs}_metrics.pkl")
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='')
-    parser.add_argument('--runs', type=int, default=10,
+    parser.add_argument('--dataset', type=str, default='MNIST')
+    parser.add_argument('--runs', type=int, default=1,
                         help='')
     args = parser.parse_args()
     main(**vars(args))
