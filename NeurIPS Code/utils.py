@@ -1,24 +1,29 @@
+import pickle
 from typing import Dict, List, Tuple, Union
 
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from torch import Tensor
-from torch.optim import Adam, SGD
-from torch.utils.data import Dataset, DataLoader, TensorDataset
-from torchmetrics import Accuracy, Precision, Recall, F1Score
-from torchvision import datasets, transforms
+from torch.optim import Adam
+from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.utils.data import DataLoader, TensorDataset
+from torchvision import datasets, models, transforms
 
-from neural_networks import BasicBlock, SimpleNN, ResNet
+from neural_networks import SimpleNN
 
 EPSILON = 0.000000001  # cutoff for the computation of the variance in the standardisation
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-EPOCHS = 500
+EPOCHS = 100
 CRITERION = torch.nn.CrossEntropyLoss()
 np.random.seed(42)
 torch.manual_seed(42)
 if torch.cuda.is_available():
     torch.cuda.manual_seed_all(42)
+
+
+def load_results(filename):
+    with open(filename, 'rb') as f:
+        return pickle.load(f)
 
 
 def load_data_and_normalize(dataset_name: str, subset_size: int) -> TensorDataset:
@@ -36,166 +41,88 @@ def load_data_and_normalize(dataset_name: str, subset_size: int) -> TensorDatase
                                                     transform=transforms.ToTensor())
     test_dataset = getattr(datasets, dataset_name)(root="./data", train=False, download=True,
                                                    transform=transforms.ToTensor())
+    if dataset_name == 'CIFAR10':
+        train_dataset.data = torch.tensor(train_dataset.data).permute(0, 3, 1, 2)
+        test_dataset.data = torch.tensor(test_dataset.data).permute(0, 3, 1, 2)
     # Concatenate train and test datasets
     full_data = torch.cat([train_dataset.data.unsqueeze(1).float(), test_dataset.data.unsqueeze(1).float()])
-    full_targets = torch.cat([train_dataset.targets, test_dataset.targets])
+    if dataset_name == 'CIFAR10':
+        full_data = full_data.squeeze(1)
+    full_targets = torch.cat([torch.tensor(train_dataset.targets), torch.tensor(test_dataset.targets)])
     # Shuffle the combined dataset
     np.random.seed(42)
     shuffled_indices = np.random.permutation(len(full_data))
     full_data, full_targets = full_data[torch.tensor(shuffled_indices)], full_targets[torch.tensor(shuffled_indices)]
     # Select a subset based on the 'subset_size' parameter
-    subset_data = full_data[:subset_size]
-    subset_targets = full_targets[:subset_size]
-    # Calculate mean and variance for the subset
+    subset_data, subset_targets = full_data[:subset_size], full_targets[:subset_size]
+    # Normalize the data
     data_means = torch.mean(subset_data, dim=(0, 2, 3)) / 255.0
-    data_vars = torch.sqrt(torch.var(subset_data, dim=(0, 2, 3)) / 255.0 ** 2 + EPSILON)
-    # Apply the calculated normalization to the subset
-    normalize_transform = transforms.Normalize(mean=data_means, std=data_vars)
+    data_std = full_data.std(dim=(0, 2, 3)) / 255.0
+    normalize_transform = transforms.Normalize(mean=data_means, std=data_std)
     normalized_subset_data = normalize_transform(subset_data / 255.0)
-    # Create a TensorDataset from the normalized subset. This will make the code significantly faster than passing the
-    # normalization transform to the DataLoader (as it's usually done).
-    normalized_subset = TensorDataset(normalized_subset_data, subset_targets)
-    return normalized_subset
+    return TensorDataset(normalized_subset_data, subset_targets)
 
 
-def transform_datasets_to_dataloaders(dataset: TensorDataset) -> DataLoader:
-    """ Transforms TensorDataset to DataLoader for bull-batch training. The below implementation makes full-batch
-    training faster than it would usually be.
-
-    :param dataset: TensorDataset to be transformed
-    :return: DataLoader version of dataset ready for full-batch training
-    """
-    loader = DataLoader(dataset, batch_size=len(dataset), shuffle=False)
-    for data, target in loader:
-        loader = DataLoader(TensorDataset(data, target), batch_size=len(data), shuffle=False)
-    return loader
-
-
-def initialize_model(latent: int = 1, evaluation_network: str = 'SimpleNN',
-                     dataset: str = 'MNIST') -> Tuple[SimpleNN, SGD]:
-    """ Used to initialize the model and optimizer.
-
-    :param latent: the index of the hidden layer used to extract the latent representation for radii computations
-    :param evaluation_network: specifies the type of network to initialize
-    :param dataset: specifies which dataset will the model be trained on (needed to set input & output layer)
-    :return: initialized SimpleNN model and SGD optimizer
-    """
-    if evaluation_network == 'SimpleNN':
-        if dataset in ['MNIST', 'FashionMNIST', 'KMNIST']:
-            model = SimpleNN(28 * 28, 2, 20, latent)
-        else:
-            model = SimpleNN(3*32*32, 8, 30, latent)
-        optimizer = SGD(model.parameters(), lr=0.1)
+# Define a function to initialize models and their corresponding optimizers
+def initialize_models(dataset_name: str, DEVICE: str) -> Tuple[List[torch.nn.Module], List[Adam]]:
+    if dataset_name == 'CIFAR10':
+        print('Loading ResNet56, VGG19_bn, MobileNetV2_x1_4, ShuffleNetV2_x2_0 and RepVGG_A2.')
+        model_names = [
+            "cifar10_resnet56",
+            "cifar10_vgg19_bn",
+            "cifar10_mobilenetv2_x1_4",
+            "cifar10_shufflenetv2_x2_0",
+            "cifar10_repvgg_a2"
+        ]
+        # Create three instances of each model type with fresh initializations
+        model_list = [torch.hub.load("chenyaofo/pytorch-cifar-models", model_name, pretrained=False).to(DEVICE)
+                      for model_name in model_names for _ in range(3)]
     else:
-        if dataset in ['MNIST', 'FashionMNIST', 'KMNIST']:
-            model = ResNet(img_channels=1, num_layers=18, block=BasicBlock, num_classes=10)
-        else:
-            model = ResNet(img_channels=3, num_layers=18, block=BasicBlock, num_classes=10)
-        optimizer = Adam(model.parameters(), lr=0.001, weight_decay=1e-2)
-    model.to(DEVICE)
-    return model, optimizer
+        print('Loading SimpleNN.')
+        # Assuming SimpleNN is a previously defined simple neural network
+        # Instantiate SimpleNN 10 times with fresh initializations
+        model_list = [SimpleNN(28*28, 2, 20, 1).to(DEVICE) for _ in range(10)]
+
+    # Create a separate optimizer for each model
+    optimizer_list = [Adam(model.parameters(), lr=0.01, weight_decay=1e-4) for model in model_list]
+
+    return model_list, optimizer_list
 
 
-def train_model(model: Union[SimpleNN, ResNet], loader: DataLoader, optimizer: Union[SGD, Adam],
-                compute_radii: bool = True) -> List[Tuple[int, Dict[int, torch.Tensor]]]:
+def test(model: torch.nn.Module, loader: DataLoader) -> dict[str, float]:
+    """Measures the accuracy of the 'model' on the test set.
+
+    :param model: The model to evaluate.
+    :param loader: DataLoader containing test data.
+    :return: Dictionary with accuracy on the test set rounded to 2 decimal places.
     """
-
-    :param model: model to be trained
-    :param loader: DataLoader to be used for training
-    :param optimizer: optimizer to be used for training
-    :param compute_radii: flag specifying if the user wants to compute the radii of class manifolds during training
-    :return: list of tuples of the form (epoch_index, radii_of_class_manifolds), where the radii are stored in a
-    dictionary of the form {class_index: [torch.Tensor]}
-    """
-    epoch_radii = []
-    for epoch in range(EPOCHS):
-        model.train()
-        for data, target in loader:
-            data, target = data.to(DEVICE), target.to(DEVICE)
-            optimizer.zero_grad()
-            output = model(data)
-            loss = CRITERION(output, target)
-            loss.backward()
-            optimizer.step()
-        # Do not compute the radii for the first 20 epochs, as those can be unstable. The number 20 was taken from
-        # https://github.com/marco-gherardi/stragglers
-        if compute_radii and epoch > 20:
-            current_radii = model.radii(loader, set())
-            epoch_radii.append((epoch, current_radii))
-    return epoch_radii
-
-
-def load_results(filename):
-    import pickle
-    with open(filename, 'rb') as f:
-        return pickle.load(f)
-
-
-def identify_hard_samples(strategy: str, dataset: TensorDataset, level: str, noise_ratio: float) -> List[Tensor]:
-    """ This function divides 'loader' (or 'dataset', depending on the used 'strategy') into hard and easy samples.
-
-    :param strategy: specifies the strategy used for identifying hard samples; only 'stragglers', 'confidence' and
-    'energy' allowed
-    :param dataset: TensorDataset that contains the data to be divided into easy and hard samples
-    :param level: specifies the level at which the energy is computed and how the hard samples are chosen; only
-    'dataset' and 'class' allowed
-    :param noise_ratio: used when adding label noise to the dataset. Make sure that noise_ratio is in range of [0, 1)
-    :return: list containing the identified hard and easy samples with the indices of hard samples
-    """
-
-    """confidences = []
-    model, optimizer = initialize_model()
-    loader = torch.utils.data.DataLoader(dataset, batch_size=len(dataset), shuffle=False)
-    for data, target in loader:  # This is done to increase the speed (works due to full-batch setting)
-        loader = DataLoader(TensorDataset(data, target), batch_size=len(data), shuffle=False)
-    train_model(model, loader, optimizer, False)
     model.eval()
-    # Iterate through the data samples in 'loader'; compute and save their confidence/energy (depending on 'strategy')
+    correct = 0
+    total = 0
     with torch.no_grad():
         for data, target in loader:
             data, target = data.to(DEVICE), target.to(DEVICE)
-            output = model(data)
-            confidence = output.max(1)[0].cpu().numpy()
-            confidences.extend(list(zip(range(len(dataset)), confidence)))"""
+            outputs = model(data)
+            _, predicted = torch.max(outputs.data, 1)  # Get the index of the max log-probability
+            total += target.size(0)  # Increment the total count
+            correct += (predicted == target).sum().item()  # Increment the correct count
 
-    confidences = load_results(f'MNIST_1_metrics.pkl')[0]
-    # Corrected list comprehension to directly unpack index and confidence
-    confidence_indices = [(confidence, index) for index, confidence in confidences]
-
-    # Sort the list by confidence in ascending order to find the most uncertain samples
-    sorted_confidence_indices = sorted(confidence_indices, key=lambda x: x[0], reverse=False)
-
-    # Select the indices of the hard and easy samples based on the threshold
-    num_hard_samples = int(0.05 * len(confidences))
-    hard_sample_indices = list({index for _, index in sorted_confidence_indices[:num_hard_samples]})
-    easy_sample_indices = list({index for _, index in sorted_confidence_indices[num_hard_samples:]})
-    hard_data = torch.tensor([], dtype=torch.float32).to(DEVICE)
-    hard_target = torch.tensor([], dtype=torch.long).to(DEVICE)
-    easy_data = torch.tensor([], dtype=torch.float32).to(DEVICE)
-    easy_target = torch.tensor([], dtype=torch.long).to(DEVICE)
-    loader = transform_datasets_to_dataloaders(dataset)
-    for data, target in loader:
-        hard_data = torch.cat((hard_data, data[hard_sample_indices]), dim=0)
-        hard_target = torch.cat((hard_target, target[hard_sample_indices]), dim=0)
-        easy_data = torch.cat((easy_data, data[easy_sample_indices]), dim=0)
-        easy_target = torch.cat((easy_target, target[easy_sample_indices]), dim=0)
-
-    return [hard_data, hard_target, easy_data, easy_target]
+    accuracy = 100 * correct / total
+    return {'accuracy': round(accuracy, 2)}
 
 
 def create_dataloaders_with_straggler_ratio(hard_data: Tensor, easy_data: Tensor, hard_target: Tensor,
-                                            easy_target: Tensor, reduce_hard: bool,
-                                            remaining_train_ratio: float) -> Tuple[DataLoader, List[DataLoader]]:
+                                            easy_target: Tensor, remove_hard: bool,
+                                            sample_removal_rate: float) -> Tuple[DataLoader, List[DataLoader]]:
     """ This function divides easy and hard data samples into train and test sets.
 
     :param hard_data: identifies hard samples (data)
     :param hard_target: identified hard samples (target)
     :param easy_data: identified easy samples (data)
     :param easy_target: identified easy samples (target)
-    :param train_ratio: percentage of train set to whole dataset
-    :param reduce_hard: flag indicating whether we want to see the effect of changing the number of easy (False) or
+    :param remove_hard: flag indicating whether we want to see the effect of changing the number of easy (False) or
     hard (True) samples
-    :param remaining_train_ratio: ratio of easy/hard samples remaining in the train set (0.1 means that 90% of hard
+    :param sample_removal_rate: ratio of easy/hard samples remaining in the train set (0.1 means that 90% of hard
     samples will be removed from the pool of hard samples when generating train set, when reduce_hard == True)
     :return: returns train loader and 3 test loaders - 1) with all data samples; 2) with only hard data samples; and 3)
     with only easy data samples.
@@ -204,7 +131,7 @@ def create_dataloaders_with_straggler_ratio(hard_data: Tensor, easy_data: Tensor
     hard_perm, easy_perm = torch.randperm(hard_data.size(0)), torch.randperm(easy_data.size(0))
     hard_data, hard_target = hard_data[hard_perm], hard_target[hard_perm]
     easy_data, easy_target = easy_data[easy_perm], easy_target[easy_perm]
-    # Split data into initial train/test sets based on the train_ratio and make sure that train_ratio is correct
+    # Split data into initial train/test sets (use 80:20 ratio for training:test set
     train_size_hard = int(len(hard_data) * 0.8)
     train_size_easy = int(len(easy_data) * 0.8)
     hard_train_data, hard_test_data = hard_data[:train_size_hard], hard_data[train_size_hard:]
@@ -212,14 +139,15 @@ def create_dataloaders_with_straggler_ratio(hard_data: Tensor, easy_data: Tensor
     easy_train_data, easy_test_data = easy_data[:train_size_easy], easy_data[train_size_easy:]
     easy_train_target, easy_test_target = easy_target[:train_size_easy], easy_target[train_size_easy:]
     # Reduce the number of train samples by remaining_train_ratio
-    if not 0 <= remaining_train_ratio <= 1:
-        raise ValueError(f'The parameter remaining_train_ratio must be in [0, 1]; {remaining_train_ratio} not allowed.')
-    if reduce_hard:
-        reduced_hard_train_size = int(train_size_hard * remaining_train_ratio)
+    if not 0 <= sample_removal_rate <= 1:
+        raise ValueError(f'The parameter remaining_train_ratio must be in [0, 1]; {sample_removal_rate} not allowed.')
+    if remove_hard:
+        reduced_hard_train_size = int(train_size_hard * (1 - sample_removal_rate))
         reduced_easy_train_size = train_size_easy
     else:
         reduced_hard_train_size = train_size_hard
-        reduced_easy_train_size = int(train_size_easy * remaining_train_ratio)
+        reduced_easy_train_size = int(train_size_easy * (1 - sample_removal_rate))
+    print(f'Proceeding with {reduced_hard_train_size} hard samples, and {reduced_easy_train_size} easy samples.')
     # Combine easy and hard samples into train and test data
     train_data = torch.cat((hard_train_data[:reduced_hard_train_size],
                             easy_train_data[:reduced_easy_train_size]), dim=0)
@@ -241,41 +169,32 @@ def create_dataloaders_with_straggler_ratio(hard_data: Tensor, easy_data: Tensor
     return train_loader, test_loaders
 
 
-def test(model: SimpleNN, loader: DataLoader) -> dict[str, float]:
-    """ Measures the accuracy of the 'model' on the test set.
-
-    :param model: model, which performance we want to evaluate
-    :param loader: DataLoader containing test data
-    :return: accuracy on the test set rounded to 2 decimal places
-    """
-    model.eval()
-    num_classes = 10
-    # Initialize metrics
-    accuracy = Accuracy(task="multiclass", num_classes=10).to(DEVICE)
-    precision = Precision(task="multiclass", num_classes=num_classes, average='macro').to(DEVICE)
-    recall = Recall(task="multiclass", num_classes=num_classes, average='macro').to(DEVICE)
-    f1_score = F1Score(task="multiclass", num_classes=num_classes, average='macro').to(DEVICE)
-    with torch.no_grad():
+def train(dataset: str, model: Union[SimpleNN, torch.nn.Module], loader: DataLoader, optimizer: Adam,
+          compute_radii: bool = False) -> List[Tuple[int, Dict[int, torch.Tensor]]]:
+    scheduler = CosineAnnealingLR(optimizer, T_max=EPOCHS)
+    epoch_radii = []
+    for epoch in range(EPOCHS):
+        model.train()
         for data, target in loader:
-            data, target = data.to(DEVICE), target.to(DEVICE)
-            outputs = model(data)
-            # Update metrics
-            accuracy.update(outputs, target)
-            precision.update(outputs, target)
-            recall.update(outputs, target)
-            f1_score.update(outputs, target)
-    # Compute final results
-    accuracy_result = round(accuracy.compute().item() * 100, 2)
-    precision_result = round(precision.compute().item() * 100, 2)
-    recall_result = round(recall.compute().item() * 100, 2)
-    f1_result = round(f1_score.compute().item() * 100, 2)
-    return {'accuracy': accuracy_result, 'precision': precision_result, 'recall': recall_result, 'f1': f1_result}
+            inputs, labels = data.to(DEVICE), target.to(DEVICE)
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = CRITERION(outputs, labels)
+            loss.backward()
+            optimizer.step()
+        if dataset == 'CIFAR10':
+            scheduler.step()
+        # Do not compute the radii for the first 20 epochs, as those can be unstable. The number 20 was taken from
+        # https://github.com/marco-gherardi/stragglers
+        if compute_radii and epoch > 20:
+            current_radii = model.radii(loader, set())
+            epoch_radii.append((epoch, current_radii))
+    return epoch_radii
 
 
 def straggler_ratio_vs_generalisation(hard_data: Tensor, hard_target: Tensor, easy_data: Tensor, easy_target: Tensor,
-                                      reduce_hard: bool, remaining_train_ratios: List[float],
-                                      current_metrics: Dict[str, Dict[float, Dict[str, List]]],
-                                      evaluation_network: str):
+                                      remove_hard: bool, sample_removal_rates: List[float], dataset_name: str,
+                                      current_metrics: Dict[str, Dict[float, Dict[str, List]]]):
     """ In this function we want to measure the effect of changing the number of easy/hard samples on the accuracy on
     the test set for distinct train:test ratio (where train:test ratio is passed as a parameter). The experiments are
     repeated multiple times to ensure that they are initialization-invariant.
@@ -284,28 +203,29 @@ def straggler_ratio_vs_generalisation(hard_data: Tensor, hard_target: Tensor, ea
     :param hard_target: identified hard samples (target)
     :param easy_data: identified easy samples (data)
     :param easy_target: identified easy samples (target)
-    :param train_ratio: percentage of train set to whole dataset
-    :param reduce_hard: flag indicating whether we want to see the effect of changing the number of easy (False) or
+    :param remove_hard: flag indicating whether we want to see the effect of changing the number of easy (False) or
     hard (True) samples
-    :param remaining_train_ratios: list of ratios of easy/hard samples remaining in the train set (0.1 means that 90% of
+    :param sample_removal_rates: list of ratios of easy/hard samples remaining in the train set (0.1 means that 90% of
     hard samples were removed from the train set before training, when reduce_hard == True)
+    :param dataset_name: name of the dataset
     :param current_metrics: used to save accuracies, precision, recall and f1-score to the outer scope
-    :param evaluation_network: this network will be used to measure the performance on hard/easy data
     """
     generalisation_settings = ['full', 'hard', 'easy']
-    for remaining_train_ratio in remaining_train_ratios:
+    for sample_removal_rate in sample_removal_rates:
         metrics_for_ratio = {metric: [[], [], []] for metric in ['accuracy', 'precision', 'recall', 'f1']}
         train_loader, test_loaders = create_dataloaders_with_straggler_ratio(hard_data, easy_data, hard_target,
-                                                                             easy_target,
-                                                                             reduce_hard, remaining_train_ratio)
+                                                                             easy_target, remove_hard,
+                                                                             sample_removal_rate)
         # We train multiple times to make sure that the performance is initialization-invariant
         for _ in range(1):
-            model, optimizer = initialize_model(evaluation_network=evaluation_network)
-            train_model(model, train_loader, optimizer, False)
+            models, optimizers = initialize_models(dataset_name)
+            train(dataset_name, models[0], train_loader, optimizers[0])
+            print(f'Accuracies for {sample_removal_rate} % of {["easy", "hard"][remove_hard]} samples removed from '
+                  f'training set.')
             # Evaluate the model on test set
             for i in range(3):
-                metrics = test(model, test_loaders[i])
-                print(metrics['accuracy'])
+                metrics = test(models[0], test_loaders[i])
+                print(f'    {generalisation_settings[i]} - {metrics["accuracy"]}%')
                 for metric_name, metric_values in metrics.items():
                     metrics_for_ratio[metric_name][i].append(metric_values)
         # Save the accuracies to the outer scope (outside of this function)
@@ -313,63 +233,7 @@ def straggler_ratio_vs_generalisation(hard_data: Tensor, hard_target: Tensor, ea
             for metric_name in metrics_for_ratio:
                 if setting not in current_metrics:
                     current_metrics[setting] = {}
-                if remaining_train_ratio not in current_metrics[setting]:
-                    current_metrics[setting][remaining_train_ratio] = {metric: [] for metric in metrics_for_ratio}
-                current_metrics[setting][remaining_train_ratio][metric_name].extend(metrics_for_ratio[metric_name][i])
-
-
-def plot_radii(all_radii: List[List[Tuple[int, Dict[int, torch.Tensor]]]], dataset_name: str, save: bool = False):
-    """ This function plots the radii of class manifolds (generates Figure 2 from our paper).
-
-    :param all_radii: list containing 10 lists - each showing the development of the radii of class manifolds during
-    training
-    :param dataset_name: used when saving to indicate on which dataset the results come from
-    :param save: flag indicating whether to save or not
-    """
-    colors = plt.cm.Blues(np.linspace(0.3, 0.9, len(all_radii)))  # Darker to lighter blues
-    fig, axes = plt.subplots(2, 5, figsize=(20, 8))
-    for run_index in range(len(all_radii)):
-        radii = all_radii[run_index]
-        for i, ax in enumerate(axes.flatten()):
-            y = [radii[j][1][i].cpu() for j in range(len(radii))]
-            x = [radii[j][0] for j in range(len(radii))]
-            ax.plot(x, y, color=colors[run_index], linewidth=3)
-            if run_index == 0:
-                ax.set_title(f'Class {i} Radii Over Epoch')
-                ax.set_xlabel('Epoch')
-                ax.set_ylabel('Radius')
-                ax.grid(True)
-    plt.tight_layout()
-    if save:
-        plt.savefig(f'Figures/radii_on_{dataset_name}.png')
-        plt.savefig(f'Figures/radii_on_{dataset_name}.pdf')
-
-
-def plot_generalisation(train_ratios: list[float], remaining_train_ratios: list[float], reduce_hard: bool,
-                        avg_accuracies: Dict[str, Dict[float, List[float]]], strategy: str, level: str,
-                        std_accuracies: Dict[str, Dict[float, List[float]]], noise_ratio: float, dataset_name: str):
-    colors = plt.cm.Blues(np.linspace(0.3, 0.9, len(train_ratios)))
-    for setting in ['full', 'hard', 'easy']:
-        for idx in range(len(train_ratios)):
-            ratio = train_ratios[idx]
-            plt.errorbar(remaining_train_ratios, avg_accuracies[setting][ratio], marker='o', markersize=5,
-                         yerr=std_accuracies[setting][ratio], capsize=5, linewidth=2, color=colors[idx],
-                         label=f'Training:Test={int(100 * ratio)}:{100 - int(100 * ratio)}')
-        plt.xlabel(f'Proportion of {["Easy", "Hard"][reduce_hard]} Samples Remaining in Training Set', fontsize=14)
-        plt.ylabel(f'Accuracy on {setting.capitalize()} Test Set (%)', fontsize=14)
-        plt.xticks(fontsize=12)
-        plt.yticks(fontsize=12)
-        plt.grid(True)
-        plt.legend(title='Training:Test Ratio')
-        plt.tight_layout()
-        # Generate a title for the figure
-        s = ''
-        if strategy != 'stragglers':
-            s = f'{level}_'
-        plt.savefig(
-            f'Figures/generalisation_from_{["easy", "hard"][reduce_hard]}_to_{setting}_on_{dataset_name}_using_{s}'
-            f'{strategy}_{noise_ratio}noise.png')
-        plt.savefig(
-            f'Figures/generalisation_from_{["easy", "hard"][reduce_hard]}_to_{setting}_on_{dataset_name}_using_{s}'
-            f'{strategy}_{noise_ratio}noise.pdf')
-        plt.clf()
+                if sample_removal_rate not in current_metrics[setting]:
+                    current_metrics[setting][sample_removal_rate] = {metric: [] for metric in metrics_for_ratio}
+                current_metrics[setting][sample_removal_rate][metric_name].extend(metrics_for_ratio[metric_name][i])
+    print()

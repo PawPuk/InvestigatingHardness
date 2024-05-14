@@ -3,7 +3,6 @@ import pickle
 from typing import List
 
 from torch import Tensor
-from torch.utils.data import Subset
 import tqdm
 
 from utils import load_data_and_normalize, straggler_ratio_vs_generalisation
@@ -32,23 +31,23 @@ def identify_hard_samples(confidences: List[List[float]], dataset, threshold: fl
     return [least_confident_data, least_confident_targets, most_confident_data, most_confident_targets]
 
 
-def main(dataset_name: str, thresholds: List[float], remaining_train_ratios: List[float], reduce_hard: bool,
-         subset_size: int, evaluation_network: str):
+def main(dataset_name: str, thresholds: List[float], sample_removal_rates: List[float], remove_hard: bool,
+         subset_size: int):
     dataset = load_data_and_normalize(dataset_name, subset_size)
-    confidences = load_results('Results/MNIST_1_metrics.pkl')
+    confidences = load_results('Results/MNIST_10_metrics.pkl')
     generalisation_settings = ['full', 'hard', 'easy']
     all_metrics = {}
     for idx, threshold in tqdm.tqdm(enumerate(thresholds)):
-        current_metrics = {setting: {reduce_train_ratio: {'accuracy': [], 'precision': [], 'recall': [], 'f1': []}
-                                     for reduce_train_ratio in remaining_train_ratios}
+        current_metrics = {setting: {sample_removal_rate: {'accuracy': [], 'precision': [], 'recall': [], 'f1': []}
+                                     for sample_removal_rate in sample_removal_rates}
                            for setting in generalisation_settings}
         hard_data, hard_target, easy_data, easy_target = identify_hard_samples(confidences, dataset, threshold)
         print(f'A total of {len(hard_data)} hard samples and {len(easy_data)} easy samples were found.')
-        straggler_ratio_vs_generalisation(hard_data, hard_target, easy_data, easy_target, reduce_hard,
-                                          remaining_train_ratios, current_metrics, evaluation_network)
+        straggler_ratio_vs_generalisation(hard_data, hard_target, easy_data, easy_target, remove_hard,
+                                          sample_removal_rates, dataset_name, current_metrics)
         # After each train_ratio, add the collected metrics to the all_metrics dictionary
         all_metrics[threshold] = current_metrics
-    metrics_filename = f"{dataset_name}_{reduce_hard}_{subset_size}_metrics.pkl"
+    metrics_filename = f"{dataset_name}_{remove_hard}_{subset_size}_metrics.pkl"
     with open(metrics_filename, 'wb') as f:
         pickle.dump(all_metrics, f)
 
@@ -58,21 +57,18 @@ if __name__ == "__main__":
         description='Script to investigate the impact of reducing hard/easy samples on generalisation.')
     parser.add_argument('--dataset_name', type=str, default='MNIST',
                         help='Dataset name. The code was tested on MNIST, FashionMNIST and KMNIST.')
-    parser.add_argument('--thresholds', nargs='+', type=float, default=[0.05, 0.1],
+    parser.add_argument('--thresholds', nargs='+', type=float, default=[0.05, 0.1, 0.2],
                         help='')
-    parser.add_argument('--remaining_train_ratios', nargs='+', type=float,
-                        default=[0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.5, 0.75, 1.0],
+    parser.add_argument('--sample_removal_rates', nargs='+', type=float,
+                        default=[0.0, 0.025, 0.05, 0.1, 0.15, 0.25, 0.5, 0.75, 1.0],
                         help='Percentage of train hard/easy samples on which we train; we only reduce the number of '
                              'hard OR easy samples (depending on --reduce_hard flag). So 0.1 means that 90% of hard '
                              'samples will be removed from the train set before training (when reduce_hard == True).')
-    parser.add_argument('--reduce_hard', action='store_true', default=False,
+    parser.add_argument('--remove_hard', action='store_true', default=False,
                         help='flag indicating whether we want to see the effect of changing the number of easy (False) '
                              'or hard (True) samples.')
-    parser.add_argument('--subset_size', default=20000, type=int,
+    parser.add_argument('--subset_size', default=70000, type=int,
                         help='Specifies the subset of the dataset used for the experiments. Later it will be divided '
                              'into train and testing training and test sets based pm the --train_ratios parameter.')
-    parser.add_argument('--evaluation_network', default='SimpleNN', choices=['SimpleNN', 'ResNet'],
-                        help='Specifies the network that will be used for evaluating the performance on hard and easy '
-                             'data. This shows that no matter the network used, the hard samples remain hard to learn')
     args = parser.parse_args()
     main(**vars(args))

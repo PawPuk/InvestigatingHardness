@@ -66,7 +66,7 @@ def initialize_model(dataset_name: str) -> Tuple[torch.nn.Module, Adam]:
 
 
 def train(dataset: str, model: torch.nn.Module, loader: DataLoader, optimizer: Adam):
-    for epoch in tqdm(range(500), desc='Epochs'):
+    for epoch in tqdm(range(EPOCHS), desc='Epochs'):
         if dataset == 'CIFAR':
             # Adjust the learning rate
             lr = 0.001 * (0.1 ** (epoch // 30))
