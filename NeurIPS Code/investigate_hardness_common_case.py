@@ -5,7 +5,7 @@ from typing import List
 from torch import Tensor
 import tqdm
 
-from utils import load_data_and_normalize, straggler_ratio_vs_generalisation
+from utils import load_data_and_normalize, investigate_within_class_imbalance1
 
 
 def load_results(filename):
@@ -14,13 +14,19 @@ def load_results(filename):
 
 
 def identify_hard_samples(confidences: List[List[float]], dataset, threshold: float) -> List[Tensor]:
+    transposed_confidences = list(zip(*confidences))
+    # Calculate mean confidence per sample
+    average_confidences = [sum(sample_confidences) / len(sample_confidences) for sample_confidences in
+                           transposed_confidences]
     # Number of samples to include in the least confident subset
-    num_least_confident = int(threshold * len(confidences[0]))
-    # Sort indices by confidence, ascending (least confident first)
-    sorted_indices = sorted(range(len(confidences[0])), key=lambda i: confidences[0][i])
+    num_least_confident = int(threshold * len(average_confidences))
+    # Sort indices by average confidence, ascending (least confident first)
+    sorted_indices = sorted(range(len(average_confidences)), key=lambda i: average_confidences[i])
     # Divide indices into least and most confident based on the threshold
     least_confident_indices = sorted_indices[:num_least_confident]
     most_confident_indices = sorted_indices[num_least_confident:]
+    # Reverse the most confident indices to start with the most confident
+    most_confident_indices = most_confident_indices[::-1]
     # Extract data and targets from dataset
     data, targets = dataset.tensors
     # Extract least and most confident data and targets
@@ -43,8 +49,8 @@ def main(dataset_name: str, thresholds: List[float], sample_removal_rates: List[
                            for setting in generalisation_settings}
         hard_data, hard_target, easy_data, easy_target = identify_hard_samples(confidences, dataset, threshold)
         print(f'A total of {len(hard_data)} hard samples and {len(easy_data)} easy samples were found.')
-        straggler_ratio_vs_generalisation(hard_data, hard_target, easy_data, easy_target, remove_hard,
-                                          sample_removal_rates, dataset_name, current_metrics)
+        investigate_within_class_imbalance1(hard_data, hard_target, easy_data, easy_target, remove_hard,
+                                            sample_removal_rates, dataset_name, current_metrics)
         # After each train_ratio, add the collected metrics to the all_metrics dictionary
         all_metrics[threshold] = current_metrics
     metrics_filename = f"{dataset_name}_{remove_hard}_{subset_size}_metrics.pkl"
@@ -60,7 +66,7 @@ if __name__ == "__main__":
     parser.add_argument('--thresholds', nargs='+', type=float, default=[0.05, 0.1, 0.2],
                         help='')
     parser.add_argument('--sample_removal_rates', nargs='+', type=float,
-                        default=[0.0, 0.025, 0.05, 0.1, 0.15, 0.25, 0.5, 0.75, 1.0],
+                        default=[0.0, 0.25, 0.5, 0.75, 0.9, 0.95, 1.0],
                         help='Percentage of train hard/easy samples on which we train; we only reduce the number of '
                              'hard OR easy samples (depending on --reduce_hard flag). So 0.1 means that 90% of hard '
                              'samples will be removed from the train set before training (when reduce_hard == True).')

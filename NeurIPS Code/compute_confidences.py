@@ -52,6 +52,6 @@ def main(dataset_name: str, runs: int):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='')
     parser.add_argument('--dataset_name', type=str, default='MNIST')
-    parser.add_argument('--runs', type=int, default=15)
+    parser.add_argument('--runs', type=int, default=20)
     args = parser.parse_args()
     main(**vars(args))
