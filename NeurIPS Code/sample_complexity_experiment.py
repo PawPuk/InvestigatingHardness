@@ -189,7 +189,7 @@ class SampleComplexityEstimator:
         ax.set_xlabel('X Coordinate')
         ax.set_ylabel('Y Coordinate')
 
-    def main(self, dataset, a, samples_per_neighbourhood, threshold, init, opt, lr, wd, epochs):
+    def main(self, dataset, a, samples_per_neighbourhood, threshold, init, opt, lr, wd, epochs, runs, networks):
         results = []
         # Assuming neighborhoods are already defined:
         neighborhoods = self.define_neighbourhood_bounds(dataset, a, samples_per_neighbourhood)
@@ -200,8 +200,8 @@ class SampleComplexityEstimator:
         # Estimate sample complexity of all neighbourhoods
         for neighbourhood_index, neighbourhood in tqdm(enumerate(neighborhoods)):
             results.append([neighbourhood])
-            estimated_sample_complexities = [0 for _ in range(3)]
-            for run_index in tqdm(range(3)):
+            estimated_sample_complexities = [0 for _ in range(runs)]
+            for run_index in tqdm(range(runs)):
                 # Filter out the data of the current neighbourhood from the training dataset
                 mask = torch.ones(train_dataset.tensors[0].size(0), dtype=torch.bool, device=DEVICE)
                 mask[indices_list[neighbourhood_index]] = False
@@ -212,7 +212,7 @@ class SampleComplexityEstimator:
                                                  shuffle=True)
                 while True:
                     # For each run train an ensemble of models
-                    models = [self.MLP(init) for _ in range(5)]
+                    models = [self.MLP(init) for _ in range(networks)]
                     if opt == 'ADAM':
                         optimizers = [optim.Adam(model.parameters(), lr=lr, weight_decay=wd) for model in models]
                     else:
@@ -247,19 +247,19 @@ class SampleComplexityEstimator:
         # Normalize color map based on the maximum additional samples needed
         self.plot_data_with_neighborhoods(neighborhoods, train_dataset, final_estimated_sample_complexities)
         plt.savefig(f'Figures/{dataset}_a_{a}_samples_{samples_per_neighbourhood}_t_{threshold}_init_{init}_opt_{opt}_'
-                    f'lr_{lr}_epochs_{epochs}.pdf')
+                    f'lr_{lr}_epochs_{epochs}_runs_{runs}_networks_{networks}.pdf')
 
 
 def main(dataset):
     estimator = SampleComplexityEstimator()
     for i, samples in enumerate([3]):
-        estimator.main(dataset, a=0.5, samples_per_neighbourhood=samples, threshold=95, init=2, opt='ADAM', lr=0.01,
-                       wd=1e-4, epochs=200)
+        estimator.main(dataset, a=0.5, samples_per_neighbourhood=samples, threshold=99, init=2, opt='ADAM', lr=0.01,
+                       wd=1e-4, epochs=100, runs=5, networks=10)
     plt.show()
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='')
-    parser.add_argument('--dataset', type=int, choices=[1, 2, 3], default=3)
+    parser.add_argument('--dataset', type=int, choices=[1, 2, 3], default=1)
     args = parser.parse_args()
     main(**vars(args))

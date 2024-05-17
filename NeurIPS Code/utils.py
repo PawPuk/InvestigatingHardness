@@ -4,7 +4,7 @@ import pickle
 import numpy as np
 import torch
 from torch import Tensor
-from torch.optim import Adam
+from torch.optim import Adam, SGD
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader, TensorDataset
 from torchvision import datasets, transforms
@@ -30,6 +30,13 @@ def load_results(filename):
 def save_data(data, file_name: str):
     with open(file_name, 'wb') as f:
         pickle.dump(data, f)
+
+
+def transform_datasets_to_dataloaders(dataset: TensorDataset, shuffle=False) -> DataLoader:
+    loader = DataLoader(dataset, batch_size=len(dataset), shuffle=False)
+    for data, target in loader:
+        loader = DataLoader(TensorDataset(data, target), batch_size=len(data), shuffle=shuffle)
+    return loader
 
 
 def load_data_and_normalize(dataset_name: str, subset_size: int) -> TensorDataset:
@@ -63,15 +70,16 @@ def load_data_and_normalize(dataset_name: str, subset_size: int) -> TensorDatase
     subset_data, subset_targets = full_data[:subset_size], full_targets[:subset_size]
     # Normalize the data
     data_means = torch.mean(subset_data, dim=(0, 2, 3)) / 255.0
-    data_std = full_data.std(dim=(0, 2, 3)) / 255.0
-    normalize_transform = transforms.Normalize(mean=data_means, std=data_std)
+    data_vars = torch.sqrt(torch.var(subset_data, dim=(0, 2, 3)) / 255.0 ** 2 + EPSILON)
+    # Apply the calculated normalization to the subset
+    normalize_transform = transforms.Normalize(mean=data_means, std=data_vars)
     normalized_subset_data = normalize_transform(subset_data / 255.0)
     print(torch.mean(normalized_subset_data, dim=(0, 2, 3)))
     print(torch.std(normalized_subset_data, dim=(0, 2, 3)))
     return TensorDataset(normalized_subset_data, subset_targets)
 
 
-def initialize_models(dataset_name: str) -> Tuple[List[torch.nn.Module], List[Adam]]:
+def initialize_models(dataset_name: str) -> Tuple[List[torch.nn.Module], List[Union[Adam, SGD]]]:
     if dataset_name == 'CIFAR10':
         print('Loading ResNet56, VGG19_bn, MobileNetV2_x1_4, ShuffleNetV2_x2_0 and RepVGG_A2.')
         model_names = [
@@ -85,13 +93,12 @@ def initialize_models(dataset_name: str) -> Tuple[List[torch.nn.Module], List[Ad
                       for model_name in model_names for _ in range(5)]
     else:
         print('Loading SimpleNN.')
-        # Assuming SimpleNN is a previously defined simple neural network
-        # Instantiate SimpleNN 10 times with fresh initializations
         model_list = [SimpleNN(28 * 28, 2, 20, 1).to(DEVICE) for _ in range(10)]
-
-    # Create a separate optimizer for each model
-    optimizer_list = [Adam(model.parameters(), lr=0.01, betas=(0.9, 0.999), weight_decay=1e-4) for model in model_list]
-
+    if dataset_name == 'CIFAR10':
+        optimizer_list = [Adam(model.parameters(), lr=0.01, betas=(0.9, 0.999), weight_decay=1e-4) for model in
+                          model_list]
+    else:
+        optimizer_list = [SGD(model.parameters(), lr=0.1) for model in model_list]
     return model_list, optimizer_list
 
 
@@ -208,10 +215,10 @@ def split_data(data: Tensor, targets: Tensor, remove_hard: bool,
 
 
 def train(dataset: str, model: Union[SimpleNN, torch.nn.Module], loader: DataLoader, optimizer: Adam,
-          compute_radii: bool = False) -> List[Tuple[int, Dict[int, torch.Tensor]]]:
-    scheduler = CosineAnnealingLR(optimizer, T_max=EPOCHS)
+          compute_radii: bool = False, epochs=EPOCHS) -> List[Tuple[int, Dict[int, torch.Tensor]]]:
+    scheduler = CosineAnnealingLR(optimizer, T_max=epochs)
     epoch_radii = []
-    for epoch in range(EPOCHS):
+    for epoch in range(epochs):
         model.train()
         for data, target in loader:
             inputs, labels = data.to(DEVICE), target.to(DEVICE)
