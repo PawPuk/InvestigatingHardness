@@ -27,6 +27,11 @@ def load_results(filename):
         return pickle.load(f)
 
 
+def save_data(data, file_name: str):
+    with open(file_name, 'wb') as f:
+        pickle.dump(data, f)
+
+
 def load_data_and_normalize(dataset_name: str, subset_size: int) -> TensorDataset:
     """ Used to load the data from common datasets available in torchvision, and normalize them. The normalization
     is based on the mean and std of a random subset of the dataset of the size subset_size.
@@ -90,7 +95,7 @@ def initialize_models(dataset_name: str) -> Tuple[List[torch.nn.Module], List[Ad
     return model_list, optimizer_list
 
 
-def test(model: torch.nn.Module, loader: DataLoader) -> dict[str, float]:
+def test(model: torch.nn.Module, loader: DataLoader) -> float:
     """Measures the accuracy of the 'model' on the test set.
 
     :param model: The model to evaluate.
@@ -109,7 +114,7 @@ def test(model: torch.nn.Module, loader: DataLoader) -> dict[str, float]:
             correct += (predicted == target).sum().item()  # Increment the correct count
 
     accuracy = 100 * correct / total
-    return {'accuracy': round(accuracy, 2)}
+    return round(accuracy, 2)
 
 
 def combine_and_split_data(hard_data: Tensor, easy_data: Tensor, hard_target: Tensor, easy_target: Tensor,
@@ -182,7 +187,7 @@ def split_data(data: Tensor, targets: Tensor, remove_hard: bool,
     :return: returns train loader and test loader
     """
     if not remove_hard:
-        data, targets = data[::-1], targets[::-1]
+        data, targets = torch.flip(data, dims=[0]), torch.flip(targets, dims=[0])
     # Split data into initial train/test sets (use 10k test samples)
     training_set_size = int(len(data) * (1 - (10000 / len(data))))
     training_data, test_data = data[:training_set_size], data[training_set_size:]
@@ -227,7 +232,7 @@ def train(dataset: str, model: Union[SimpleNN, torch.nn.Module], loader: DataLoa
 
 def investigate_within_class_imbalance1(hard_data: Tensor, hard_target: Tensor, easy_data: Tensor, easy_target: Tensor,
                                         remove_hard: bool, sample_removal_rates: List[float], dataset_name: str,
-                                        current_metrics: Dict[str, Dict[float, Dict[str, List]]]):
+                                        current_metrics: Dict[str, Dict[float, List]]):
     """ In this function we want to measure the effect of changing the number of easy/hard samples on the accuracy on
     the test set for distinct train:test ratio (where train:test ratio is passed as a parameter). The experiments are
     repeated multiple times to ensure that they are initialization-invariant.
@@ -245,7 +250,6 @@ def investigate_within_class_imbalance1(hard_data: Tensor, hard_target: Tensor, 
     """
     generalisation_settings = ['full', 'hard', 'easy']
     for sample_removal_rate in tqdm(sample_removal_rates, desc='Sample removal rates'):
-        metrics_for_ratio = {metric: [[], [], []] for metric in ['accuracy', 'precision', 'recall', 'f1']}
         train_loader, test_loaders = combine_and_split_data(hard_data, easy_data, hard_target, easy_target, remove_hard,
                                                             sample_removal_rate)
         # We train multiple times to make sure that the performance is initialization-invariant
@@ -256,24 +260,15 @@ def investigate_within_class_imbalance1(hard_data: Tensor, hard_target: Tensor, 
                   f'training set.')
             # Evaluate the model on test set
             for i in range(3):
-                metrics = test(models[0], test_loaders[i])
-                print(f'    {generalisation_settings[i]} - {metrics["accuracy"]}%')
-                for metric_name, metric_values in metrics.items():
-                    metrics_for_ratio[metric_name][i].append(metric_values)
-        # Save the accuracies to the outer scope (outside of this function)
-        for i, setting in enumerate(generalisation_settings):
-            for metric_name in metrics_for_ratio:
-                if setting not in current_metrics:
-                    current_metrics[setting] = {}
-                if sample_removal_rate not in current_metrics[setting]:
-                    current_metrics[setting][sample_removal_rate] = {metric: [] for metric in metrics_for_ratio}
-                current_metrics[setting][sample_removal_rate][metric_name].extend(metrics_for_ratio[metric_name][i])
+                accuracy = test(models[0], test_loaders[i])
+                print(f'    {generalisation_settings[i]} - {accuracy}%')
+                current_metrics[generalisation_settings[i]][sample_removal_rate].append(accuracy)
         print()
 
 
 def investigate_within_class_imbalance2(data: Tensor, targets: Tensor, remove_hard: bool,
                                         sample_removal_rates: List[float], dataset_name: str,
-                                        current_metrics: Dict[float, Dict[str, List]]):
+                                        current_metrics: Dict[float, List]):
     """ In this function we want to measure the effect of changing the number of easy/hard samples on the accuracy on
     the test set for distinct train:test ratio (where train:test ratio is passed as a parameter). The experiments are
     repeated multiple times to ensure that they are initialization-invariant.
@@ -287,7 +282,6 @@ def investigate_within_class_imbalance2(data: Tensor, targets: Tensor, remove_ha
     :param current_metrics: used to save accuracies, precision, recall and f1-score to the outer scope
     """
     for sample_removal_rate in tqdm(sample_removal_rates, desc='Sample removal rates'):
-        metrics_for_ratio = {metric: [] for metric in ['accuracy', 'precision', 'recall', 'f1']}
         train_loader, test_loader = split_data(data, targets, remove_hard, sample_removal_rate)
         # We train multiple times to make sure that the performance is initialization-invariant
         for _ in range(10):
@@ -296,13 +290,7 @@ def investigate_within_class_imbalance2(data: Tensor, targets: Tensor, remove_ha
             print(f'Accuracies for {sample_removal_rate} % of {["easy", "hard"][remove_hard]} samples removed from '
                   f'training set.')
             # Evaluate the model on test set
-            metrics = test(models[0], test_loader)
-            print(f'    Achieved {metrics["accuracy"]}% accuracy.')
-            for metric_name, metric_values in metrics.items():
-                metrics_for_ratio[metric_name].append(metric_values)
-        # Save the accuracies to the outer scope (outside of this function)
-        for metric_name in metrics_for_ratio:
-            if sample_removal_rate not in current_metrics:
-                current_metrics[sample_removal_rate] = {metric: [] for metric in metrics_for_ratio}
-            current_metrics[sample_removal_rate][metric_name].extend(metrics_for_ratio[metric_name][i])
+            accuracy = test(models[0], test_loader)
+            print(f'    Achieved {accuracy}% accuracy on the test set.')
+            current_metrics[sample_removal_rate].append(accuracy)
         print()

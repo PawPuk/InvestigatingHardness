@@ -28,11 +28,6 @@ def compute_confidences(model: torch.nn.Module, loader: DataLoader) -> List[arra
     return confidences
 
 
-def save_data(data, file_name: str):
-    with open(file_name, 'wb') as f:
-        pickle.dump(data, f)
-
-
 def main(dataset_name: str, runs: int):
     dataset = utils.load_data_and_normalize(dataset_name, 70000)
     full_loader = DataLoader(dataset, batch_size=128, shuffle=False)
@@ -45,8 +40,8 @@ def main(dataset_name: str, runs: int):
         confidences = compute_confidences(my_models[i], full_loader)
         all_confidences.append(confidences)
         current_metrics = utils.test(my_models[i], full_loader)
-        print(current_metrics['accuracy'])
-    save_data(all_confidences, f"Results/{dataset_name}_{runs}_metrics.pkl")
+        print(current_metrics)
+    utils.save_data(all_confidences, f"Results/{dataset_name}_{runs}_metrics.pkl")
 
 
 if __name__ == '__main__':

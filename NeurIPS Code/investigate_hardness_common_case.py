@@ -44,8 +44,7 @@ def main(dataset_name: str, thresholds: List[float], sample_removal_rates: List[
     generalisation_settings = ['full', 'hard', 'easy']
     all_metrics = {}
     for idx, threshold in tqdm.tqdm(enumerate(thresholds)):
-        current_metrics = {setting: {sample_removal_rate: {'accuracy': [], 'precision': [], 'recall': [], 'f1': []}
-                                     for sample_removal_rate in sample_removal_rates}
+        current_metrics = {setting: {sample_removal_rate: [] for sample_removal_rate in sample_removal_rates}
                            for setting in generalisation_settings}
         hard_data, hard_target, easy_data, easy_target = identify_hard_samples(confidences, dataset, threshold)
         print(f'A total of {len(hard_data)} hard samples and {len(easy_data)} easy samples were found.')

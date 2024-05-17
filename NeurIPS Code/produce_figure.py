@@ -41,7 +41,8 @@ def plot_threshold(threshold_data, threshold_name):
 
 
 def main():
-    results = load_results('Results/CIFAR10_True_70000_metrics.pkl')
+    results = load_results('Results/old_CIFAR10_True_70000_metrics.pkl')
+    print(results)
     plt.figure(figsize=(12, 8))
 
     for threshold_name, threshold_data in results.items():
@@ -49,7 +50,6 @@ def main():
 
     plt.xlabel('X values')
     plt.ylabel('Y values')
-    plt.title('Mean and Standard Deviation of Functions for All Thresholds')
     plt.tight_layout()
     plt.grid(True)
     plt.savefig('Section4_hard.pdf')
