@@ -2,39 +2,14 @@ import argparse
 import pickle
 from typing import List
 
-from torch import Tensor
 import tqdm
 
-from utils import load_data_and_normalize, investigate_within_class_imbalance1
+from utils import load_data_and_normalize, identify_hard_samples_by_confidences, investigate_within_class_imbalance1
 
 
 def load_results(filename):
     with open(filename, 'rb') as f:
         return pickle.load(f)
-
-
-def identify_hard_samples(confidences: List[List[float]], dataset, threshold: float) -> List[Tensor]:
-    transposed_confidences = list(zip(*confidences))
-    # Calculate mean confidence per sample
-    average_confidences = [sum(sample_confidences) / len(sample_confidences) for sample_confidences in
-                           transposed_confidences]
-    # Number of samples to include in the least confident subset
-    num_least_confident = int(threshold * len(average_confidences))
-    # Sort indices by average confidence, ascending (least confident first)
-    sorted_indices = sorted(range(len(average_confidences)), key=lambda i: average_confidences[i])
-    # Divide indices into least and most confident based on the threshold
-    least_confident_indices = sorted_indices[:num_least_confident]
-    most_confident_indices = sorted_indices[num_least_confident:]
-    # Reverse the most confident indices to start with the most confident
-    most_confident_indices = most_confident_indices[::-1]
-    # Extract data and targets from dataset
-    data, targets = dataset.tensors
-    # Extract least and most confident data and targets
-    least_confident_data = data[least_confident_indices]
-    least_confident_targets = targets[least_confident_indices]
-    most_confident_data = data[most_confident_indices]
-    most_confident_targets = targets[most_confident_indices]
-    return [least_confident_data, least_confident_targets, most_confident_data, most_confident_targets]
 
 
 def main(dataset_name: str, thresholds: List[float], sample_removal_rates: List[float], remove_hard: bool,
@@ -46,7 +21,8 @@ def main(dataset_name: str, thresholds: List[float], sample_removal_rates: List[
     for idx, threshold in tqdm.tqdm(enumerate(thresholds)):
         current_metrics = {setting: {sample_removal_rate: [] for sample_removal_rate in sample_removal_rates}
                            for setting in generalisation_settings}
-        hard_data, hard_target, easy_data, easy_target = identify_hard_samples(confidences, dataset, threshold)
+        hard_data, hard_target, easy_data, easy_target = identify_hard_samples_by_confidences(confidences, dataset,
+                                                                                              threshold)
         print(f'A total of {len(hard_data)} hard samples and {len(easy_data)} easy samples were found.')
         investigate_within_class_imbalance1(hard_data, hard_target, easy_data, easy_target, remove_hard,
                                             sample_removal_rates, dataset_name, current_metrics)

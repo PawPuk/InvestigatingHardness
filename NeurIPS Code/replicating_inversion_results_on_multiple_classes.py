@@ -2,7 +2,7 @@ import argparse
 
 from tqdm import tqdm
 
-from utils import initialize_models, load_data_and_normalize, train, transform_datasets_to_dataloaders, save_data
+from utils import initialize_model, load_data_and_normalize, train, transform_datasets_to_dataloaders, save_data
 
 
 def main(dataset_name: str, subset_size: int, runs: int):
@@ -11,8 +11,8 @@ def main(dataset_name: str, subset_size: int, runs: int):
     all_epoch_radii = []
     for _ in tqdm(range(runs), desc='Investigating the dynamics of the radii of class manifolds for distinctly '
                                     'initialized networks'):
-        models, optimizers = initialize_models('MNIST')
-        model, optimizer = models[0], optimizers[0]
+        models, optimizers = initialize_model()
+        model, optimizer = models, optimizers
         epoch_radii = train(dataset_name, model, loader, optimizer, True, 250)
         all_epoch_radii.append(epoch_radii)
     save_data(all_epoch_radii, f'Results/Radii_over_epoch/all_epoch_radii_{subset_size}{dataset_name}.pkl')

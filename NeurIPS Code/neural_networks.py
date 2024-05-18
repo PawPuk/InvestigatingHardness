@@ -3,6 +3,7 @@ from typing import Dict, Set
 # This code is a modified version from https://github.com/marco-gherardi/stragglers
 import torch
 from torch import Tensor
+import torch.nn as nn
 from torch.utils.data import DataLoader
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -40,7 +41,7 @@ class MyNN(torch.nn.Module):
 
 
 class SimpleNN(MyNN):
-    def __init__(self, in_size: int, depth: int, width_hid: int, latent: int, out_size: int = 10):
+    def __init__(self, in_size: int = 784, depth: int = 2, width_hid: int = 20, latent: int = 1, out_size: int = 10):
         """
 
         :param in_size: size of input
@@ -73,4 +74,70 @@ class SimpleNN(MyNN):
             x = self.layers[layer_index](x)
             if layer_index < len(self.layers) - 1:
                 x = torch.tanh(x)
+        return x
+
+
+class LeNet(nn.Module):
+    def __init__(self):
+        super(LeNet, self).__init__()
+        self.convnet = nn.Sequential(
+            nn.Conv2d(1, 20, kernel_size=5),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2),
+            nn.Conv2d(20, 50, kernel_size=5),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2)
+        )
+        self.fc = nn.Sequential(
+            nn.Linear(800, 500),
+            nn.ReLU(),
+            nn.Linear(500, 10)
+        )
+
+    def forward(self, x):
+        x = self.convnet(x)
+        x = x.view(x.size(0), -1)
+        x = self.fc(x)
+        return x
+
+
+class SimpleMLP(nn.Module):
+    def __init__(self):
+        super(SimpleMLP, self).__init__()
+        self.fc = nn.Sequential(
+            nn.Linear(28*28, 512),
+            nn.ReLU(),
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.Linear(256, 10)
+        )
+
+    def forward(self, x):
+        x = x.view(-1, 28*28)  # Flatten the image
+        x = self.fc(x)
+        return x
+
+
+class SmallCNN(nn.Module):
+    def __init__(self):
+        super(SmallCNN, self).__init__()
+        self.convnet = nn.Sequential(
+            nn.Conv2d(1, 32, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=3, stride=2),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2),
+            nn.Dropout(0.25)
+        )
+        self.fc = nn.Sequential(
+            nn.Linear(64 * 6 * 6, 128),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Linear(128, 10)
+        )
+
+    def forward(self, x):
+        x = self.convnet(x)
+        x = x.view(x.size(0), -1)
+        x = self.fc(x)
         return x

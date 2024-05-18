@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from torchvision import datasets, transforms
 from tqdm import tqdm
 
-from neural_networks import SimpleNN
+from neural_networks import LeNet, SimpleMLP, SimpleNN, SmallCNN
 
 EPSILON = 0.000000001  # cutoff for the computation of the variance in the standardisation
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -79,9 +79,8 @@ def load_data_and_normalize(dataset_name: str, subset_size: int) -> TensorDatase
     return TensorDataset(normalized_subset_data, subset_targets)
 
 
-def initialize_models(dataset_name: str) -> Tuple[List[torch.nn.Module], List[Union[Adam, SGD]]]:
+def initialize_models(dataset_name: str) -> Tuple[List[Union[torch.nn.Module, SimpleNN]], List[Union[Adam, SGD]]]:
     if dataset_name == 'CIFAR10':
-        print('Loading ResNet56, VGG19_bn, MobileNetV2_x1_4, ShuffleNetV2_x2_0 and RepVGG_A2.')
         model_names = [
             "cifar10_resnet56",
             "cifar10_mobilenetv2_x1_4",
@@ -92,14 +91,15 @@ def initialize_models(dataset_name: str) -> Tuple[List[torch.nn.Module], List[Un
         model_list = [torch.hub.load("chenyaofo/pytorch-cifar-models", model_name, pretrained=False).to(DEVICE)
                       for model_name in model_names for _ in range(5)]
     else:
-        print('Loading SimpleNN.')
-        model_list = [SimpleNN(28 * 28, 2, 20, 1).to(DEVICE) for _ in range(10)]
-    if dataset_name == 'CIFAR10':
-        optimizer_list = [Adam(model.parameters(), lr=0.01, betas=(0.9, 0.999), weight_decay=1e-4) for model in
-                          model_list]
-    else:
-        optimizer_list = [SGD(model.parameters(), lr=0.1) for model in model_list]
+        model_list = [model().to(DEVICE) for model in [LeNet, SimpleMLP, SmallCNN, SimpleNN] for _ in range(5)]
+    optimizer_list = [Adam(model.parameters(), lr=0.01, betas=(0.9, 0.999), weight_decay=1e-4) for model in model_list]
     return model_list, optimizer_list
+
+
+def initialize_model() -> Tuple[SimpleNN, SGD]:
+    model = SimpleNN(28 * 28, 2, 20, 1).to(DEVICE)
+    optimizer = SGD(model.parameters(), lr=0.1)
+    return model, optimizer
 
 
 def test(model: torch.nn.Module, loader: DataLoader) -> float:
@@ -214,7 +214,48 @@ def split_data(data: Tensor, targets: Tensor, remove_hard: bool,
     return train_loader, test_loader
 
 
-def train(dataset: str, model: Union[SimpleNN, torch.nn.Module], loader: DataLoader, optimizer: Adam,
+def train_stop_at_inversion(model: SimpleNN, loader: DataLoader,
+                            optimizer: SGD) -> Tuple[Dict[int, SimpleNN], Dict[int, int]]:
+    """ Train a model and monitor the radii of class manifolds. When an inversion point is identified for a class, save
+    the current state of the model to the 'model' list that is returned by this function.
+
+    :param model: this model will be used to find the inversion point
+    :param loader: the program will look for stragglers within the data in this loader
+    :param optimizer: used for training
+    :return: dictionary mapping an index of a class manifold to a model, which can be used to extract stragglers for
+    the given class
+    """
+    prev_radii, models = {class_idx: torch.tensor(float('inf')) for class_idx in range(10)}, {}
+    found_classes = set()  # Keep track of classes for which the inversion point has already been found.
+    inversion_points = {}
+    for epoch in range(EPOCHS):
+        model.train()
+        for data, target in loader:
+            data, target = data.to(DEVICE), target.to(DEVICE)
+            optimizer.zero_grad()
+            output = model(data)
+            loss = CRITERION(output, target)
+            loss.backward()
+            optimizer.step()
+        # To increase sustainability and reduce complexity we check for the inversion point every 5 epochs.
+        if epoch % 5 == 0:
+            # Compute radii of class manifolds at this epoch
+            current_radii = model.radii(loader, found_classes)
+            for key in current_radii.keys():
+                # For each class see if the radii didn't increase -> reached inversion point. We only check after epoch
+                # 20 for the same reasons as in train_model()
+                if key not in models.keys() and current_radii[key] > prev_radii[key] and epoch > 20:
+                    models[key] = model.to(DEVICE)
+                    found_classes.add(key)
+                    inversion_points[key] = epoch
+            prev_radii = current_radii
+        if set(models.keys()) == set(range(10)):
+            break
+    print(f'The following are the epochs of inversion_points per class - {inversion_points}')
+    return models, inversion_points
+
+
+def train(dataset: str, model: Union[SimpleNN, torch.nn.Module], loader: DataLoader, optimizer: Union[Adam, SGD],
           compute_radii: bool = False, epochs=EPOCHS) -> List[Tuple[int, Dict[int, torch.Tensor]]]:
     scheduler = CosineAnnealingLR(optimizer, T_max=epochs)
     epoch_radii = []
@@ -301,3 +342,70 @@ def investigate_within_class_imbalance2(data: Tensor, targets: Tensor, remove_ha
             print(f'    Achieved {accuracy}% accuracy on the test set.')
             current_metrics[sample_removal_rate].append(accuracy)
         print()
+
+
+def identify_hard_samples_by_confidences(confidences: List[List[float]], dataset, threshold: float) -> List[Tensor]:
+    transposed_confidences = list(zip(*confidences))
+    # Calculate mean confidence per sample
+    average_confidences = [sum(sample_confidences) / len(sample_confidences) for sample_confidences in
+                           transposed_confidences]
+    # Number of samples to include in the least confident subset
+    num_least_confident = int(threshold * len(average_confidences))
+    # Sort indices by average confidence, ascending (least confident first)
+    sorted_indices = sorted(range(len(average_confidences)), key=lambda i: average_confidences[i])
+    # Divide indices into least and most confident based on the threshold
+    least_confident_indices = sorted_indices[:num_least_confident]
+    most_confident_indices = sorted_indices[num_least_confident:]
+    # Reverse the most confident indices to start with the most confident
+    most_confident_indices = most_confident_indices[::-1]
+    # Extract data and targets from dataset
+    data, targets = dataset.tensors
+    # Extract least and most confident data and targets
+    least_confident_data = data[least_confident_indices]
+    least_confident_targets = targets[least_confident_indices]
+    most_confident_data = data[most_confident_indices]
+    most_confident_targets = targets[most_confident_indices]
+    return [least_confident_data, least_confident_targets, most_confident_data, most_confident_targets]
+
+
+"""def identify_hard_samples(strategy: str, dataset: TensorDataset, level: str, dataset_name: str) -> List[Tensor]:
+    models, optimizers = initialize_models(dataset_name)
+    loader = transform_datasets_to_dataloaders(dataset)
+    model, optimizer = models[0], optimizers[0]
+    # The following are used to store all stragglers and non-stragglers
+    hard_data = torch.tensor([], dtype=torch.float32).to(DEVICE)
+    hard_target = torch.tensor([], dtype=torch.long).to(DEVICE)
+    easy_data = torch.tensor([], dtype=torch.float32).to(DEVICE)
+    easy_target = torch.tensor([], dtype=torch.long).to(DEVICE)
+    # Look for inversion point for each class manifold
+    models, _ = train_stop_at_inversion(model, loader, optimizer)
+    # Check if stragglers for all classes were found. If not repeat the search
+    if set(models.keys()) != set(range(10)):
+        print('Have to restart because not all stragglers were found.')
+        return identify_hard_samples(strategy, dataset, level, dataset_name)
+    # This is used to know the distribution of stragglers between classes
+    stragglers = [torch.tensor(False) for _ in range(10)]
+    # Iterate through all data samples in 'loader' and divide them into stragglers/non-stragglers
+    for data, target in loader:
+        data, target = data.to(DEVICE), target.to(DEVICE)
+        for class_idx in range(10):
+            # Find stragglers and non-stragglers for the class manifold
+            stragglers[class_idx] = ((torch.argmax(models[class_idx](data), dim=1) != target) & (target == class_idx))
+            current_non_stragglers = (torch.argmax(models[class_idx](data), dim=1) == target) & (target == class_idx)
+            # Save stragglers and non-stragglers from class 'class_idx' to the outer scope (outside of this for loop)
+            hard_data = torch.cat((hard_data, data[stragglers[class_idx]]), dim=0)
+            hard_target = torch.cat((hard_target, target[stragglers[class_idx]]), dim=0)
+            easy_data = torch.cat((easy_data, data[current_non_stragglers]), dim=0)
+            easy_target = torch.cat((easy_target, target[current_non_stragglers]), dim=0)
+    # Compute the class-level number of stragglers
+    aggregated_stragglers = [int(tensor.sum().item()) for tensor in stragglers]
+    stragglers = [torch.where(tensor)[0] for tensor in stragglers]
+    print(f'Found {sum(aggregated_stragglers)} stragglers ({len(hard_data)} hard samples).')
+    if strategy in ["confidence", "energy"]:
+        saved_rng_state = torch.get_rng_state()
+        # Identify hard an easy samples using confidence- or energy-based method
+        hard_data, hard_target, easy_data, easy_target, stragglers = (
+            identify_hard_samples_with_model_accuracy(dataset, aggregated_stragglers, strategy, level))
+        torch.set_rng_state(saved_rng_state)
+    print(f'Found {sum(aggregated_stragglers)} stragglers ({len(hard_data)} hard samples).')
+    return [hard_data, hard_target, easy_data, easy_target, stragglers]"""
