@@ -9,7 +9,7 @@ from utils import load_results, load_data_and_normalize, identify_hard_samples, 
 
 
 def main(dataset_name: str, strategy: str, runs: int, sample_removal_rates: List[float], remove_hard: bool,
-         level: str, subset_size: int):
+         subset_size: int):
     dataset = load_data_and_normalize(dataset_name, subset_size)
     confidences_and_energy = load_results(f'Results/{dataset_name}_20_metrics.pkl')
     indices_of_hard_samples = []
@@ -17,7 +17,7 @@ def main(dataset_name: str, strategy: str, runs: int, sample_removal_rates: List
                for setting in ['full', 'hard', 'easy']}
     for _ in tqdm.tqdm(range(runs), desc='Repeating the experiment for different straggler sets'):
         hard_data, hard_target, easy_data, easy_target, hard_indices = identify_hard_samples(strategy, dataset,
-                                                                                             level, dataset_name,
+                                                                                             dataset_name,
                                                                                              confidences_and_energy)
         print(f'A total of {len(hard_data)} hard samples and {len(easy_data)} easy samples were found.')
         investigate_within_class_imbalance_common(runs, hard_data, hard_target, easy_data, easy_target, remove_hard,
@@ -46,9 +46,6 @@ if __name__ == "__main__":
     parser.add_argument('--remove_hard', action='store_true', default=False,
                         help='flag indicating whether we want to see the effect of changing the number of easy (False) '
                              'or hard (True) samples.')
-    parser.add_argument('--level', type=str, choices=['class', 'dataset'], default='dataset',
-                        help='Specifies the level at which the energy is computed. Is also affects how the hard samples'
-                             ' are chosen in confidence- and energy-based methods')
     parser.add_argument('--subset_size', default=20000, type=int,
                         help='Specifies the subset of the dataset used for the experiments. Later it will be divided '
                              'into train and testing training and test sets based pm the --train_ratios parameter.')

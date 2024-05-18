@@ -74,7 +74,15 @@ class SampleComplexityEstimator:
                         neighborhoods.append(Neighbourhood(x, x + a, y, y + a, class_id, num_samples))
         elif dataset == 4:
             regions = [
-
+                (0, 7, 0, 1, 0),
+                (0, 1, 0, 6, 0),
+                (6, 7, 0, 6, 0),
+                (0, 7, 6, 7, 0),
+                (3, 4, 3, 4, 0),
+                (1.5, 5.5, 1.5, 2.5, 1),
+                (1.5, 2.5, 2.5, 4.5, 1),
+                (4.5, 5.5, 2.5, 4.5, 1),
+                (1.5, 5.5, 4.5, 5.5, 1)
             ]
             for x_start, x_end, y_start, y_end, class_id in regions:
                 for x in np.arange(x_start, x_end, a):
@@ -260,6 +268,6 @@ def main(dataset):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='')
-    parser.add_argument('--dataset', type=int, choices=[1, 2, 3], default=1)
+    parser.add_argument('--dataset', type=int, choices=[1, 2, 3, 4], default=4)
     args = parser.parse_args()
     main(**vars(args))

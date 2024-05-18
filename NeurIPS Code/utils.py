@@ -260,7 +260,7 @@ def train(dataset: str, model: Union[SimpleNN, torch.nn.Module], loader: DataLoa
           compute_radii: bool = False, epochs=EPOCHS) -> List[Tuple[int, Dict[int, torch.Tensor]]]:
     scheduler = CosineAnnealingLR(optimizer, T_max=epochs)
     epoch_radii = []
-    for epoch in tqdm(range(epochs)):
+    for epoch in range(epochs):
         model.train()
         for data, target in loader:
             inputs, labels = data.to(DEVICE), target.to(DEVICE)
@@ -368,7 +368,7 @@ def identify_hard_samples_by_confidences(confidences: List[List[float]], dataset
     return [least_confident_data, least_confident_targets, most_confident_data, most_confident_targets]
 
 
-def identify_hard_samples(strategy: str, dataset: TensorDataset, level: str, dataset_name: str,
+def identify_hard_samples(strategy: str, dataset: TensorDataset, dataset_name: str,
                           confidences_and_energies: List[Tuple[float, float]]) -> List[Tensor]:
     model, optimizer = initialize_model()
     loader = transform_datasets_to_dataloaders(dataset)
@@ -382,7 +382,7 @@ def identify_hard_samples(strategy: str, dataset: TensorDataset, level: str, dat
     # Check if stragglers for all classes were found. If not repeat the search
     if set(models.keys()) != set(range(10)):
         print('Have to restart because not all stragglers were found.')
-        return identify_hard_samples(strategy, dataset, level, dataset_name, confidences_and_energies)
+        return identify_hard_samples(strategy, dataset, dataset_name, confidences_and_energies)
     # This is used to know the distribution of stragglers between classes
     stragglers = [torch.tensor(False) for _ in range(10)]
     # Iterate through all data samples in 'loader' and divide them into stragglers/non-stragglers
@@ -403,8 +403,8 @@ def identify_hard_samples(strategy: str, dataset: TensorDataset, level: str, dat
     print(f'Found {sum(aggregated_stragglers)} stragglers ({len(hard_data)} hard samples).')
     if strategy in ["confidence", "energy"]:
         num_samples = len(confidences_and_energies[0])
-        avg_confidences = [0] * num_samples
-        avg_energies = [0] * num_samples
+        avg_confidences = [0 for _ in range(num_samples)]
+        avg_energies = [0 for _ in range(num_samples)]
         # Sum up all confidences and energies for each sample
         for ce in confidences_and_energies:
             for i, (confidence, energy) in enumerate(ce):
@@ -415,9 +415,9 @@ def identify_hard_samples(strategy: str, dataset: TensorDataset, level: str, dat
         avg_energies = [e / len(confidences_and_energies) for e in avg_energies]
         # Sort indices based on the average confidences or energies
         if strategy == 'confidence':
-            sorted_indices = sorted(range(num_samples), key=lambda i1: avg_confidences[i1], reverse=True)
+            sorted_indices = sorted(range(num_samples), key=lambda i1: avg_confidences[i1], reverse=False)
         else:
-            sorted_indices = sorted(range(num_samples), key=lambda i1: avg_energies[i1])
+            sorted_indices = sorted(range(num_samples), key=lambda i1: avg_energies[i1], reverse=True)
         # Use the total number of stragglers as a threshold to divide data into hard and easy samples
         hard_indices = sorted_indices[:sum(aggregated_stragglers)]
         easy_indices = sorted_indices[sum(aggregated_stragglers):]
