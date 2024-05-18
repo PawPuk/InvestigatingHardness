@@ -25,7 +25,7 @@ def main(dataset_name: str, thresholds: List[float], sample_removal_rates: List[
         hard_data, hard_target, easy_data, easy_target = identify_hard_samples_by_confidences(confidences, dataset,
                                                                                               threshold)
         print(f'A total of {len(hard_data)} hard samples and {len(easy_data)} easy samples were found.')
-        investigate_within_class_imbalance_common(hard_data, hard_target, easy_data, easy_target, remove_hard,
+        investigate_within_class_imbalance_common(10, hard_data, hard_target, easy_data, easy_target, remove_hard,
                                                   sample_removal_rates, dataset_name, current_metrics)
         # After each train_ratio, add the collected metrics to the all_metrics dictionary
         all_metrics[threshold] = current_metrics
@@ -43,9 +43,8 @@ if __name__ == "__main__":
                         help='')
     parser.add_argument('--sample_removal_rates', nargs='+', type=float,
                         default=[0.0, 0.25, 0.5, 0.75, 0.9, 0.95, 1.0],
-                        help='Percentage of train hard/easy samples on which we train; we only reduce the number of '
-                             'hard OR easy samples (depending on --reduce_hard flag). So 0.1 means that 90% of hard '
-                             'samples will be removed from the train set before training (when reduce_hard == True).')
+                        help='Percentage of easy/hard (depending on the remove_hard flag) of training samples that will'
+                             'be removed.')
     parser.add_argument('--remove_hard', action='store_true', default=False,
                         help='flag indicating whether we want to see the effect of changing the number of easy (False) '
                              'or hard (True) samples.')

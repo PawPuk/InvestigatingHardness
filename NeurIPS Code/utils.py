@@ -214,21 +214,22 @@ def split_data(data: Tensor, targets: Tensor, remove_hard: bool,
     return train_loader, test_loader
 
 
-def train_stop_at_inversion(model: SimpleNN, loader: DataLoader,
-                            optimizer: SGD) -> Tuple[Dict[int, SimpleNN], Dict[int, int]]:
+def train_stop_at_inversion(model: SimpleNN, loader: DataLoader, optimizer: SGD,
+                            epochs: int = EPOCHS) -> Tuple[Dict[int, SimpleNN], Dict[int, int]]:
     """ Train a model and monitor the radii of class manifolds. When an inversion point is identified for a class, save
     the current state of the model to the 'model' list that is returned by this function.
 
     :param model: this model will be used to find the inversion point
     :param loader: the program will look for stragglers within the data in this loader
     :param optimizer: used for training
+    :param epochs: defines number of epochs for training
     :return: dictionary mapping an index of a class manifold to a model, which can be used to extract stragglers for
     the given class
     """
     prev_radii, models = {class_idx: torch.tensor(float('inf')) for class_idx in range(10)}, {}
     found_classes = set()  # Keep track of classes for which the inversion point has already been found.
     inversion_points = {}
-    for epoch in range(EPOCHS):
+    for epoch in range(epochs):
         model.train()
         for data, target in loader:
             data, target = data.to(DEVICE), target.to(DEVICE)
@@ -278,13 +279,14 @@ def train(dataset: str, model: Union[SimpleNN, torch.nn.Module], loader: DataLoa
     return epoch_radii
 
 
-def investigate_within_class_imbalance_common(hard_data: Tensor, hard_target: Tensor, easy_data: Tensor,
+def investigate_within_class_imbalance_common(networks: int, hard_data: Tensor, hard_target: Tensor, easy_data: Tensor,
                                               easy_target: Tensor, remove_hard: bool, sample_removal_rates: List[float],
                                               dataset_name: str, current_metrics: Dict[str, Dict[float, List]]):
     """ In this function we want to measure the effect of changing the number of easy/hard samples on the accuracy on
     the test set for distinct train:test ratio (where train:test ratio is passed as a parameter). The experiments are
     repeated multiple times to ensure that they are initialization-invariant.
 
+    :param networks: defines how many networks will be trained for statistical significance
     :param hard_data: identifies hard samples (data)
     :param hard_target: identified hard samples (target)
     :param easy_data: identified easy samples (data)
@@ -300,7 +302,7 @@ def investigate_within_class_imbalance_common(hard_data: Tensor, hard_target: Te
         train_loader, test_loaders = combine_and_split_data(hard_data, easy_data, hard_target, easy_target, remove_hard,
                                                             sample_removal_rate)
         # We train multiple times to make sure that the performance is initialization-invariant
-        for _ in range(10):
+        for _ in range(networks):
             models, optimizers = initialize_models(dataset_name)
             train(dataset_name, models[0], train_loader, optimizers[0])
             print(f'Accuracies for {sample_removal_rate} % of {["easy", "hard"][remove_hard]} samples removed from '
@@ -368,16 +370,15 @@ def identify_hard_samples_by_confidences(confidences: List[List[float]], dataset
 
 def identify_hard_samples(strategy: str, dataset: TensorDataset, level: str, dataset_name: str,
                           confidences_and_energies: List[Tuple[float, float]]) -> List[Tensor]:
-    models, optimizers = initialize_model()
+    model, optimizer = initialize_model()
     loader = transform_datasets_to_dataloaders(dataset)
-    model, optimizer = models, optimizers
     # The following are used to store all stragglers and non-stragglers
     hard_data = torch.tensor([], dtype=torch.float32).to(DEVICE)
     hard_target = torch.tensor([], dtype=torch.long).to(DEVICE)
     easy_data = torch.tensor([], dtype=torch.float32).to(DEVICE)
     easy_target = torch.tensor([], dtype=torch.long).to(DEVICE)
     # Look for inversion point for each class manifold
-    models, _ = train_stop_at_inversion(model, loader, optimizer)
+    models, _ = train_stop_at_inversion(model, loader, optimizer, 500)
     # Check if stragglers for all classes were found. If not repeat the search
     if set(models.keys()) != set(range(10)):
         print('Have to restart because not all stragglers were found.')
