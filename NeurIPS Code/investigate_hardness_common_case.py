@@ -4,7 +4,8 @@ from typing import List
 
 import tqdm
 
-from utils import load_data_and_normalize, identify_hard_samples_by_confidences, investigate_within_class_imbalance1
+from utils import load_data_and_normalize, identify_hard_samples_by_confidences, \
+    investigate_within_class_imbalance_common
 
 
 def load_results(filename):
@@ -24,8 +25,8 @@ def main(dataset_name: str, thresholds: List[float], sample_removal_rates: List[
         hard_data, hard_target, easy_data, easy_target = identify_hard_samples_by_confidences(confidences, dataset,
                                                                                               threshold)
         print(f'A total of {len(hard_data)} hard samples and {len(easy_data)} easy samples were found.')
-        investigate_within_class_imbalance1(hard_data, hard_target, easy_data, easy_target, remove_hard,
-                                            sample_removal_rates, dataset_name, current_metrics)
+        investigate_within_class_imbalance_common(hard_data, hard_target, easy_data, easy_target, remove_hard,
+                                                  sample_removal_rates, dataset_name, current_metrics)
         # After each train_ratio, add the collected metrics to the all_metrics dictionary
         all_metrics[threshold] = current_metrics
     metrics_filename = f"{dataset_name}_{remove_hard}_{subset_size}_metrics.pkl"

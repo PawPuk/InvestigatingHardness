@@ -259,7 +259,7 @@ def train(dataset: str, model: Union[SimpleNN, torch.nn.Module], loader: DataLoa
           compute_radii: bool = False, epochs=EPOCHS) -> List[Tuple[int, Dict[int, torch.Tensor]]]:
     scheduler = CosineAnnealingLR(optimizer, T_max=epochs)
     epoch_radii = []
-    for epoch in range(epochs):
+    for epoch in tqdm(range(epochs)):
         model.train()
         for data, target in loader:
             inputs, labels = data.to(DEVICE), target.to(DEVICE)
@@ -278,9 +278,9 @@ def train(dataset: str, model: Union[SimpleNN, torch.nn.Module], loader: DataLoa
     return epoch_radii
 
 
-def investigate_within_class_imbalance1(hard_data: Tensor, hard_target: Tensor, easy_data: Tensor, easy_target: Tensor,
-                                        remove_hard: bool, sample_removal_rates: List[float], dataset_name: str,
-                                        current_metrics: Dict[str, Dict[float, List]]):
+def investigate_within_class_imbalance_common(hard_data: Tensor, hard_target: Tensor, easy_data: Tensor,
+                                              easy_target: Tensor, remove_hard: bool, sample_removal_rates: List[float],
+                                              dataset_name: str, current_metrics: Dict[str, Dict[float, List]]):
     """ In this function we want to measure the effect of changing the number of easy/hard samples on the accuracy on
     the test set for distinct train:test ratio (where train:test ratio is passed as a parameter). The experiments are
     repeated multiple times to ensure that they are initialization-invariant.
@@ -291,8 +291,7 @@ def investigate_within_class_imbalance1(hard_data: Tensor, hard_target: Tensor, 
     :param easy_target: identified easy samples (target)
     :param remove_hard: flag indicating whether we want to see the effect of changing the number of easy (False) or
     hard (True) samples
-    :param sample_removal_rates: list of ratios of easy/hard samples remaining in the train set (0.1 means that 90% of
-    hard samples were removed from the train set before training, when reduce_hard == True)
+    :param sample_removal_rates:
     :param dataset_name: name of the dataset
     :param current_metrics: used to save accuracies, precision, recall and f1-score to the outer scope
     """
@@ -314,9 +313,9 @@ def investigate_within_class_imbalance1(hard_data: Tensor, hard_target: Tensor, 
         print()
 
 
-def investigate_within_class_imbalance2(data: Tensor, targets: Tensor, remove_hard: bool,
-                                        sample_removal_rates: List[float], dataset_name: str,
-                                        current_metrics: Dict[float, List]):
+def investigate_within_class_imbalance_edge(data: Tensor, targets: Tensor, remove_hard: bool,
+                                            sample_removal_rates: List[float], dataset_name: str,
+                                            current_metrics: Dict[float, List]):
     """ In this function we want to measure the effect of changing the number of easy/hard samples on the accuracy on
     the test set for distinct train:test ratio (where train:test ratio is passed as a parameter). The experiments are
     repeated multiple times to ensure that they are initialization-invariant.
@@ -324,8 +323,7 @@ def investigate_within_class_imbalance2(data: Tensor, targets: Tensor, remove_ha
     :param targets: labels corresponding to the sorted data samples
     :param remove_hard: flag indicating whether we want to see the effect of changing the number of easy (False) or
     hard (True) samples
-    :param sample_removal_rates: list of ratios of easy/hard samples remaining in the train set (0.1 means that 90% of
-    hard samples were removed from the train set before training, when reduce_hard == True)
+    :param sample_removal_rates:
     :param dataset_name: name of the dataset
     :param current_metrics: used to save accuracies, precision, recall and f1-score to the outer scope
     """
@@ -368,10 +366,11 @@ def identify_hard_samples_by_confidences(confidences: List[List[float]], dataset
     return [least_confident_data, least_confident_targets, most_confident_data, most_confident_targets]
 
 
-"""def identify_hard_samples(strategy: str, dataset: TensorDataset, level: str, dataset_name: str) -> List[Tensor]:
-    models, optimizers = initialize_models(dataset_name)
+def identify_hard_samples(strategy: str, dataset: TensorDataset, level: str, dataset_name: str,
+                          confidences_and_energies: List[Tuple[float, float]]) -> List[Tensor]:
+    models, optimizers = initialize_model()
     loader = transform_datasets_to_dataloaders(dataset)
-    model, optimizer = models[0], optimizers[0]
+    model, optimizer = models, optimizers
     # The following are used to store all stragglers and non-stragglers
     hard_data = torch.tensor([], dtype=torch.float32).to(DEVICE)
     hard_target = torch.tensor([], dtype=torch.long).to(DEVICE)
@@ -382,7 +381,7 @@ def identify_hard_samples_by_confidences(confidences: List[List[float]], dataset
     # Check if stragglers for all classes were found. If not repeat the search
     if set(models.keys()) != set(range(10)):
         print('Have to restart because not all stragglers were found.')
-        return identify_hard_samples(strategy, dataset, level, dataset_name)
+        return identify_hard_samples(strategy, dataset, level, dataset_name, confidences_and_energies)
     # This is used to know the distribution of stragglers between classes
     stragglers = [torch.tensor(False) for _ in range(10)]
     # Iterate through all data samples in 'loader' and divide them into stragglers/non-stragglers
@@ -402,10 +401,31 @@ def identify_hard_samples_by_confidences(confidences: List[List[float]], dataset
     stragglers = [torch.where(tensor)[0] for tensor in stragglers]
     print(f'Found {sum(aggregated_stragglers)} stragglers ({len(hard_data)} hard samples).')
     if strategy in ["confidence", "energy"]:
-        saved_rng_state = torch.get_rng_state()
-        # Identify hard an easy samples using confidence- or energy-based method
-        hard_data, hard_target, easy_data, easy_target, stragglers = (
-            identify_hard_samples_with_model_accuracy(dataset, aggregated_stragglers, strategy, level))
-        torch.set_rng_state(saved_rng_state)
+        num_samples = len(confidences_and_energies[0])
+        avg_confidences = [0] * num_samples
+        avg_energies = [0] * num_samples
+        # Sum up all confidences and energies for each sample
+        for ce in confidences_and_energies:
+            for i, (confidence, energy) in enumerate(ce):
+                avg_confidences[i] += confidence
+                avg_energies[i] += energy
+        # Divide by the number of runs to get the average
+        avg_confidences = [c / len(confidences_and_energies) for c in avg_confidences]
+        avg_energies = [e / len(confidences_and_energies) for e in avg_energies]
+        # Sort indices based on the average confidences or energies
+        if strategy == 'confidence':
+            sorted_indices = sorted(range(num_samples), key=lambda i1: avg_confidences[i1], reverse=True)
+        else:
+            sorted_indices = sorted(range(num_samples), key=lambda i1: avg_energies[i1])
+        # Use the total number of stragglers as a threshold to divide data into hard and easy samples
+        hard_indices = sorted_indices[:sum(aggregated_stragglers)]
+        easy_indices = sorted_indices[sum(aggregated_stragglers):]
+        # Assign data to hard and easy based on these indices
+        all_data = dataset.tensors[0]
+        all_targets = dataset.tensors[1]
+        hard_data = all_data[hard_indices]
+        hard_target = all_targets[hard_indices]
+        easy_data = all_data[easy_indices]
+        easy_target = all_targets[easy_indices]
     print(f'Found {sum(aggregated_stragglers)} stragglers ({len(hard_data)} hard samples).')
-    return [hard_data, hard_target, easy_data, easy_target, stragglers]"""
+    return [hard_data, hard_target, easy_data, easy_target, stragglers]

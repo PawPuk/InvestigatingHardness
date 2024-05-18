@@ -4,7 +4,7 @@ from typing import List, Tuple
 
 from torch import Tensor
 
-from utils import load_data_and_normalize, investigate_within_class_imbalance2
+from utils import load_data_and_normalize, investigate_within_class_imbalance_edge
 
 
 def load_results(filename):
@@ -32,7 +32,7 @@ def main(dataset_name: str, sample_removal_rates: List[float], remove_hard: bool
     confidences = load_results('Results/MNIST_10_metrics.pkl')
     results = {sample_removal_rate: [] for sample_removal_rate in sample_removal_rates}
     data, targets = sort_dataset_by_confidence(confidences, dataset)
-    investigate_within_class_imbalance2(data, targets, remove_hard, sample_removal_rates, dataset_name, results)
+    investigate_within_class_imbalance_edge(data, targets, remove_hard, sample_removal_rates, dataset_name, results)
     metrics_filename = f"{dataset_name}_{remove_hard}_{subset_size}_metrics.pkl"
     with open(metrics_filename, 'wb') as f:
         pickle.dump(results, f)

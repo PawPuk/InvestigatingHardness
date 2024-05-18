@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.lines as mlines
 from matplotlib.legend_handler import HandlerTuple
+from matplotlib.patches import Rectangle
 
 # Assuming load_results is properly defined somewhere
 from utils import load_results
@@ -51,16 +52,17 @@ def plot_results2(results2):
                      [y + s for y, s in zip(y_values, y_stds)],
                      color='black', alpha=0.2)
 
+
 def main():
-    results1 = load_results('Results/CIFAR10_False_70000_common_metrics.pkl')
-    results2 = load_results('Results/CIFAR10_False_70000_edge_metrics.pkl')
+    results1 = load_results('Results/CIFAR10_True_70000_common_metrics.pkl')
+    results2 = load_results('Results/CIFAR10_True_70000_edge_metrics.pkl')
     plt.figure(figsize=(12, 8))
 
     for threshold_name, threshold_data in results1.items():
         plot_threshold(threshold_data, threshold_name)
     plot_results2(results2)
 
-    plt.xlabel('Percentage of easy samples removed trom the training set')
+    plt.xlabel('Percentage of hard samples removed trom the training set')
     plt.ylabel('Accuracy')
 
     legend_items = []
@@ -75,7 +77,7 @@ def main():
 
     # Create a single legend with all settings
     legend = plt.legend(legend_items, labels, handler_map={tuple: HandlerTuple(ndivide=None)}, title="Accuracy on:",
-                        loc='center left', frameon=True, borderpad=1, bbox_to_anchor=(0.0, 0.68))
+                        loc='center left', frameon=True, borderpad=1, bbox_to_anchor=(0.05, 0.08))
     plt.gca().add_artist(legend)
 
     custom_lines = [
@@ -83,13 +85,41 @@ def main():
         plt.Line2D([0], [0], color='black', linestyle='dashed', lw=2, label='0.1'),
         plt.Line2D([0], [0], color='black', linestyle='dotted', lw=2, label='0.2')
     ]
-    line_marker_legend = plt.legend(handles=custom_lines, title='Confidence threshold (%) for hard samples:',
-                                    loc='center left', bbox_to_anchor=(0.175, 0.67))
+    line_marker_legend = plt.legend(handles=custom_lines, title='Confidence threshold (%):',
+                                    loc='center left', bbox_to_anchor=(0.225, 0.07))
     plt.gca().add_artist(line_marker_legend)
+    rect = Rectangle((0.05, 0.005), 0.355, 0.21, linewidth=1, edgecolor='k', facecolor='white', alpha=0.75,
+                     transform=plt.gca().transAxes, zorder=3)
+    plt.gca().add_patch(rect)
+    plt.text(0.1, 0.17, r"$\frac{\mathrm{hard\_train\_samples}}{\mathrm{easy\_train\_samples}} = \frac{\mathrm{hard\_test\_samples}}{\mathrm{easy\_test\_samples}}$",
+             transform=plt.gca().transAxes, fontsize=14, color='black', zorder=4)
+
+    # Create the legend for edge case
+    # Create a rectangle as the background for the custom legend
+    rect = Rectangle((0.42, 0.005), width=0.16, height=0.1, transform=plt.gca().transAxes,
+                     linewidth=1, edgecolor='black', facecolor='none', zorder=3)
+    plt.gca().add_patch(rect)
+
+    # Add texts as titles within the rectangle
+    plt.text(0.45, 0.09, 'Hard Training Set', transform=plt.gca().transAxes, fontsize=10, verticalalignment='top', zorder=4)
+    plt.text(0.46, 0.066, 'Easy Test Set', transform=plt.gca().transAxes, fontsize=10, verticalalignment='top',
+             zorder=4)
+
+    line = mlines.Line2D([0.44, 0.56], [0.025, 0.025], transform=plt.gca().transAxes, color='black',
+                         linestyle='-', markersize=10)
+    plt.gca().add_line(line)
+
+    # Manually add markers
+    markers_x = [0.44, 0.5, 0.56]  # Start, middle, end
+    for mx in markers_x:
+        marker = mlines.Line2D([mx], [0.025], color='black', marker='x', markersize=10,
+                               linestyle='None', transform=plt.gca().transAxes)
+        plt.gca().add_line(marker)
 
     plt.tight_layout()
     plt.grid(True)
-    plt.savefig('Section4_hard.pdf')
+    plt.ylim(0, 100)
+    plt.savefig('Figures/Section4_hard.pdf')
     plt.show()
 
 if __name__ == '__main__':
