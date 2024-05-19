@@ -12,7 +12,7 @@ def main(dataset_name: str, runs: int):
     for _ in tqdm(range(runs)):
         _, _, _, _, stragglers = utils.find_stragglers(dataset)
         hard_samples_indices.append(stragglers)
-    utils.save_data(hard_samples_indices, f"Results/hard_samples_indices_{dataset_name}_{runs}.pkl")
+    utils.save_data(hard_samples_indices, f"Results/straggler_indices_{dataset_name}_{runs}.pkl")
 
 
 if __name__ == '__main__':
