@@ -260,7 +260,7 @@ def train(dataset_name: str, model: Union[SimpleNN, torch.nn.Module], loader: Da
           compute_radii: bool = False, epochs=EPOCHS) -> List[Tuple[int, Dict[int, torch.Tensor]]]:
     scheduler = CosineAnnealingLR(optimizer, T_max=epochs)
     epoch_radii = []
-    for epoch in tqdm(range(epochs)):
+    for epoch in range(epochs):
         model.train()
         for data, target in loader:
             inputs, labels = data.to(DEVICE), target.to(DEVICE)
@@ -304,7 +304,15 @@ def investigate_within_class_imbalance_common(networks: int, hard_data: Tensor, 
         # We train multiple times to make sure that the performance is initialization-invariant
         for _ in range(networks):
             models, optimizers = initialize_models(dataset_name)
-            train(dataset_name, models[0], train_loader, optimizers[0])
+            if dataset_name == 'MNIST':
+                epochs = 15
+            elif dataset_name == 'KMNIST':
+                epochs = 25
+            elif dataset_name == 'FashionMNIST':
+                epochs = 35
+            else:
+                epochs = EPOCHS
+            train(dataset_name, models[0], train_loader, optimizers[0], epochs=epochs)
             print(f'Accuracies for {sample_removal_rate} % of {["easy", "hard"][remove_hard]} samples removed from '
                   f'training set.')
             # Evaluate the model on test set
