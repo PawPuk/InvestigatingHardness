@@ -107,8 +107,9 @@ def find_universal_stragglers(dataset: TensorDataset, filename: str,
 def main(dataset_name: str, thresholds: List[float], strategy: str, runs: int, depends_on_stragglers: bool):
     confidences_and_energies = load_results(f'Results/{dataset_name}_20_metrics.pkl')
     dataset = load_data_and_normalize(dataset_name, 70000)
-    filename = f'Results/straggler_indices_{dataset_name}_20.pkl'
-    _, hard_target, _, _ = find_universal_stragglers(dataset, filename)
+    if dataset_name != 'CIFAR10':
+        filename = f'Results/straggler_indices_{dataset_name}_20.pkl'
+        _, hard_target, _, _ = find_universal_stragglers(dataset, filename)
     full_dataset = load_data_and_normalize(dataset_name, 70000)
     train_set, test_set = load_data(dataset_name)
     train_loader = DataLoader(train_set, batch_size=128, shuffle=True)

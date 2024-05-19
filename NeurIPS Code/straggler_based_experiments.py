@@ -1,5 +1,4 @@
 import argparse
-from torch import Tensor
 from torch.utils.data import TensorDataset
 from typing import List, Tuple
 
@@ -67,7 +66,7 @@ if __name__ == "__main__":
                         help='Dataset name. The code was tested on MNIST, FashionMNIST and KMNIST.')
     parser.add_argument('--strategy', type=str, choices=['stragglers', 'confidence', 'energy'],
                         default='stragglers', help='Strategy (method) to use for identifying hard samples.')
-    parser.add_argument('--runs', type=int, default=1,
+    parser.add_argument('--runs', type=int, default=20,
                         help='Specifies how many straggler sets will be computed for the experiment, and how many '
                              'networks will be trained per a straggler set (for every ratio in remaining_train_ratios. '
                              'The larger this value the higher the complexity and the statistical significance.')
