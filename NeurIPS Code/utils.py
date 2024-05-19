@@ -429,18 +429,3 @@ def identify_hard_samples_with_confidences_or_energies(confidences_and_energies,
     easy_data = all_data[easy_indices]
     easy_target = all_targets[easy_indices]
     return hard_data, hard_target, easy_data, easy_target
-
-
-def identify_hard_samples(strategy: str, dataset: TensorDataset,
-                          confidences_and_energies: List[Tuple[float, float]]) -> List[Tensor]:
-    hard_data, hard_target, easy_data, easy_target, stragglers = find_stragglers(dataset)
-    # Compute the class-level number of stragglers
-    aggregated_stragglers = [int(tensor.sum().item()) for tensor in stragglers]
-    stragglers = [torch.where(tensor)[0] for tensor in stragglers]
-    print(f'Found {sum(aggregated_stragglers)} stragglers ({len(hard_data)} hard samples).')
-    if strategy in ["confidence", "energy"]:
-        threshold = sum(aggregated_stragglers)
-        hard_data, hard_target, easy_data, easy_target = \
-            identify_hard_samples_with_confidences_or_energies(confidences_and_energies, dataset, strategy, threshold)
-    print(f'Found {sum(aggregated_stragglers)} stragglers ({len(hard_data)} hard samples).')
-    return [hard_data, hard_target, easy_data, easy_target, stragglers]

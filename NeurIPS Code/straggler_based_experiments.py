@@ -5,7 +5,7 @@ from typing import List, Tuple
 
 import torch
 
-from utils import load_results, load_data_and_normalize, identify_hard_samples, \
+from utils import load_results, load_data_and_normalize, identify_hard_samples_with_confidences_or_energies, \
     investigate_within_class_imbalance_common, save_data
 
 
@@ -44,9 +44,11 @@ def main(dataset_name: str, strategy: str, runs: int, sample_removal_rates: List
                for setting in ['full', 'hard', 'easy']}
     filename = f'Results/straggler_indices_{dataset_name}_20.pkl'
     hard_data, hard_target, easy_data, easy_target = find_universal_stragglers(dataset, filename)
+    print(len(hard_data))
     if strategy != 'stragglers':
-        hard_data, hard_target, easy_data, easy_target, _ = identify_hard_samples(strategy, dataset,
-                                                                                  confidences_and_energy)
+        hard_data, hard_target, easy_data, easy_target = \
+            identify_hard_samples_with_confidences_or_energies(confidences_and_energy, dataset, strategy,
+                                                               len(hard_data))
     print(f'A total of {len(hard_data)} hard samples and {len(easy_data)} easy samples were found.')
     investigate_within_class_imbalance_common(runs, hard_data, hard_target, easy_data, easy_target, remove_hard,
                                               sample_removal_rates, dataset_name, results)
