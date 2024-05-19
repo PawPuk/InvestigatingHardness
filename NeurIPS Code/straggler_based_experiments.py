@@ -17,7 +17,6 @@ def main(dataset_name: str, strategy: str, runs: int, sample_removal_rates: List
                for setting in ['full', 'hard', 'easy']}
     for _ in tqdm.tqdm(range(runs), desc='Repeating the experiment for different straggler sets'):
         hard_data, hard_target, easy_data, easy_target, hard_indices = identify_hard_samples(strategy, dataset,
-                                                                                             dataset_name,
                                                                                              confidences_and_energy)
         print(f'A total of {len(hard_data)} hard samples and {len(easy_data)} easy samples were found.')
         investigate_within_class_imbalance_common(runs, hard_data, hard_target, easy_data, easy_target, remove_hard,

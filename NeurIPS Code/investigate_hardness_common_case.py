@@ -5,12 +5,7 @@ from typing import List
 import tqdm
 
 from utils import load_data_and_normalize, identify_hard_samples_by_confidences, \
-    investigate_within_class_imbalance_common
-
-
-def load_results(filename):
-    with open(filename, 'rb') as f:
-        return pickle.load(f)
+    investigate_within_class_imbalance_common, load_results
 
 
 def main(dataset_name: str, thresholds: List[float], sample_removal_rates: List[float], remove_hard: bool,
