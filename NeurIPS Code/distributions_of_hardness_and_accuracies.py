@@ -144,7 +144,7 @@ def main(dataset_name: str, thresholds: List[float], strategy: str, runs: int, d
         accuracies = compute_class_accuracy(model, test_loader)
         print(f'Class-level accuracies - {accuracies}')
         results['class_level_accuracies'].append(accuracies)
-    save_data(results, f'distributions_{strategy}_{dataset_name}')
+    save_data(results, f'Results/distributions_{strategy}_{dataset_name}_{depends_on_stragglers}.pkl')
 
 
 if __name__ == '__main__':
