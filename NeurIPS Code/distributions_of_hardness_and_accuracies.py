@@ -115,7 +115,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='Script to investigate the impact of reducing hard/easy samples on generalisation.')
     parser.add_argument('--dataset_name', type=str, default='MNIST',
-                        help='Dataset name. The code was tested on MNIST, FashionMNIST and KMNIST.')
+                        help='Dataset name. The code was tested on MNIST, FashionMNIST, KMNIST, and CIFAR10.')
     parser.add_argument('--thresholds', nargs='+', type=float, default=[0.05, 0.1, 0.2],
                         help='')
     parser.add_argument('--strategy', type=str, choices=['stragglers', 'confidence', 'energy'],
