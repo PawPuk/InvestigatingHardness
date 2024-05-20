@@ -39,11 +39,11 @@ def main(dataset_name: str, remove_hard: bool):
         plot_results(results['hard'], ax, f'{result_type.capitalize()} (Hard)', colors[i], markers[i], linestyles[0])
         plot_results(results['easy'], ax, f'{result_type.capitalize()} (Easy)', colors[i], markers[i], linestyles[1])
 
-    ax.set_title('Accuracy vs. Proportion of Hard Samples Remaining')
-    ax.set_xlabel('Proportion of Hard Samples Remaining in Training Set')
+    ax.set_xlabel(f'Percentage of {["easy", "hard"][remove_hard]} samples removed from the training set')
     ax.set_ylabel('Accuracy')
     ax.legend()
     ax.grid(True)
+    plt.savefig(f'Figures/{dataset_name}_{remove_hard}.pdf')
     plt.show()
 
 

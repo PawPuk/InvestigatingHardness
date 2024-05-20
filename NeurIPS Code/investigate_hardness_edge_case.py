@@ -12,11 +12,11 @@ def load_results(filename):
         return pickle.load(f)
 
 
-def sort_dataset_by_confidence(confidences: List[List[float]], dataset) -> Tuple[Tensor, Tensor]:
-    transposed_confidences = list(zip(*confidences))
+def sort_dataset_by_confidence(confidences_and_energies: List[List[Tuple[float, float]]], dataset) -> Tuple[Tensor, Tensor]:
+    # Extract confidences and ignore energies for now
+    transposed_confidences = list(zip(*[[ce[0] for ce in run_results] for run_results in confidences_and_energies]))
     # Calculate mean confidence per sample
-    average_confidences = [sum(sample_confidences) / len(sample_confidences) for sample_confidences in
-                           transposed_confidences]
+    average_confidences = [sum(sample_confidences) / len(sample_confidences) for sample_confidences in transposed_confidences]
     # Sort indices by average confidence, ascending (least confident first)
     sorted_indices = sorted(range(len(average_confidences)), key=lambda i: average_confidences[i])
     # Extract data and targets from dataset using sorted indices
@@ -29,7 +29,7 @@ def sort_dataset_by_confidence(confidences: List[List[float]], dataset) -> Tuple
 def main(dataset_name: str, sample_removal_rates: List[float], remove_hard: bool,
          subset_size: int):
     dataset = load_data_and_normalize(dataset_name, subset_size)
-    confidences = load_results('Results/MNIST_10_metrics.pkl')
+    confidences = load_results('Results/MNIST_20_metrics.pkl')
     results = {sample_removal_rate: [] for sample_removal_rate in sample_removal_rates}
     data, targets = sort_dataset_by_confidence(confidences, dataset)
     investigate_within_class_imbalance_edge(data, targets, remove_hard, sample_removal_rates, dataset_name, results)
