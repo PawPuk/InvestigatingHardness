@@ -10,22 +10,16 @@ import utils
 def load_and_analyze_results(filename, total_runs):
     # Load the data containing lists of tensors of hard samples
     hard_samples_indices = utils.load_results(filename)
-
-    # Assuming each tensor in each list is of the same length, e.g., 70,000
     num_samples = hard_samples_indices[0][0].size(0)
     # This will hold counts of how many times each sample was marked as a straggler
     straggler_counts = torch.zeros(num_samples, dtype=torch.int32)
-
     for run_list in hard_samples_indices:
         for tensor in run_list:
             straggler_counts += tensor.int()
-
     # Convert to numpy for easy handling with numpy operations
     straggler_counts_np = straggler_counts.numpy()
-
     # Calculate overlaps for thresholds from 1 to total_runs
     overlaps = [np.sum(straggler_counts_np >= threshold) for threshold in range(1, total_runs + 1)]
-
     return overlaps
 
 
@@ -42,7 +36,7 @@ def plot_overlaps(overlaps, total_runs):
 
 
 def main(dataset_name: str, runs: int):
-    filename = f'Results/straggler_indices_{dataset_name}_{runs}.pkl'
+    filename = f'Results/Stragglers/straggler_indices_{dataset_name}_{runs}.pkl'
     overlaps = load_and_analyze_results(filename, runs)
     plot_overlaps(overlaps, runs)
 
