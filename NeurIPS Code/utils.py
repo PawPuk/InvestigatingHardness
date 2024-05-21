@@ -304,15 +304,7 @@ def investigate_within_class_imbalance_common(networks: int, hard_data: Tensor, 
         # We train multiple times to make sure that the performance is initialization-invariant
         for _ in range(networks):
             models, optimizers = initialize_models(dataset_name)
-            if dataset_name == 'MNIST':
-                epochs = 15
-            elif dataset_name == 'KMNIST':
-                epochs = 25
-            elif dataset_name == 'FashionMNIST':
-                epochs = 35
-            else:
-                epochs = EPOCHS
-            train(dataset_name, models[0], train_loader, optimizers[0], epochs=epochs)
+            train(dataset_name, models[0], train_loader, optimizers[0])
             print(f'Accuracies for {sample_removal_rate} % of {["easy", "hard"][remove_hard]} samples removed from '
                   f'training set.')
             # Evaluate the model on test set
@@ -340,7 +332,7 @@ def investigate_within_class_imbalance_edge(data: Tensor, targets: Tensor, remov
     for sample_removal_rate in tqdm(sample_removal_rates, desc='Sample removal rates'):
         train_loader, test_loader = split_data(data, targets, remove_hard, sample_removal_rate)
         # We train multiple times to make sure that the performance is initialization-invariant
-        for _ in range(10):
+        for _ in range(20):
             models, optimizers = initialize_models(dataset_name)
             train(dataset_name, models[0], train_loader, optimizers[0])
             print(f'Accuracies for {sample_removal_rate} % of {["easy", "hard"][remove_hard]} samples removed from '

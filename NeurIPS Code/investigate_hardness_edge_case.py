@@ -33,7 +33,7 @@ def main(dataset_name: str, sample_removal_rates: List[float], remove_hard: bool
     results = {sample_removal_rate: [] for sample_removal_rate in sample_removal_rates}
     data, targets = sort_dataset_by_confidence(confidences, dataset)
     investigate_within_class_imbalance_edge(data, targets, remove_hard, sample_removal_rates, dataset_name, results)
-    metrics_filename = f"{dataset_name}_{remove_hard}_{subset_size}_metrics.pkl"
+    metrics_filename = f"{dataset_name}_{remove_hard}_{subset_size}_edge_metrics.pkl"
     with open(metrics_filename, 'wb') as f:
         pickle.dump(results, f)
 
@@ -43,7 +43,7 @@ if __name__ == "__main__":
         description='Script to investigate the impact of reducing hard/easy samples on generalisation.')
     parser.add_argument('--dataset_name', type=str, default='MNIST',
                         help='Dataset name. The code was tested on MNIST, FashionMNIST and KMNIST.')
-    parser.add_argument('--sample_removal_rates', nargs='+', type=float, default=[0.0, 0.25, 0.5, 0.75, 0.9, 0.95, 1.0],
+    parser.add_argument('--sample_removal_rates', nargs='+', type=float, default=[0.0, 0.25, 0.5, 0.75, 0.9, 0.95],
                         help='Percentage of train samples on which we train.')
     parser.add_argument('--remove_hard', action='store_true', default=False,
                         help='Flag indicating whether we want to see the effect of changing the number of easy (False) '

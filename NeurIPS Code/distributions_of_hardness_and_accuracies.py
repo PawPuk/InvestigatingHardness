@@ -58,6 +58,7 @@ def compute_class_accuracy(model, loader):
     class_correct = list(0. for _ in range(10))
     class_total = list(0. for _ in range(10))
     with torch.no_grad():
+        model.eval()
         for data in loader:
             images, labels = data
             images, labels = images.to(device), labels.to(device)
@@ -133,15 +134,7 @@ def main(dataset_name: str, thresholds: List[float], strategy: str, runs: int, d
     for _ in tqdm(range(runs)):
         models, optimizers = initialize_models(dataset_name)
         model, optimizer = models[0], optimizers[0]
-        if dataset_name == 'MNIST':
-            epochs = 15
-        elif dataset_name == 'KMNIST':
-            epochs = 25
-        elif dataset_name == 'FashionMNIST':
-            epochs = 35
-        else:
-            epochs = 100
-        train(dataset_name, model, train_loader, optimizer, epochs=epochs)
+        train(dataset_name, model, train_loader, optimizer)
         accuracies = compute_class_accuracy(model, test_loader)
         print(f'Class-level accuracies - {accuracies}')
         results['class_level_accuracies'].append(accuracies)
