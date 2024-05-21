@@ -12,43 +12,37 @@ def find_universal_stragglers(dataset: TensorDataset, filename: str,
                               threshold: int = 10) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     # Load the results which contain lists of tensors with straggler flags
     hard_samples_indices = load_results(filename)
-
     # Check the device of the first tensor in the first list (assuming all tensors are on the same device)
     if len(hard_samples_indices) > 0 and len(hard_samples_indices[0]) > 0:
         device = hard_samples_indices[0][0].device
     else:
         raise ValueError("No straggler data found in the results.")
-
     num_samples = dataset.tensors[0].size(0)
     straggler_counts = torch.zeros(num_samples, dtype=torch.int32, device=device)
-
     # Aggregate the counts of straggler flags across all runs
     for run_list in hard_samples_indices:
         for tensor in run_list:
-            straggler_counts += tensor.to(device).int()  # Ensure tensor is on the correct device
-
+            straggler_counts += tensor.to(device).int()
     # Identify indices that meet the threshold
-    hard_indices = torch.where(straggler_counts >= threshold)[0].cpu()  # Move indices to CPU
-    easy_indices = torch.where(straggler_counts < threshold)[0].cpu()  # Move indices to CPU
-
+    hard_indices = torch.where(straggler_counts >= threshold)[0].cpu()
+    easy_indices = torch.where(straggler_counts < threshold)[0].cpu()
     # Extract the hard and easy data and targets from the TensorDataset
-    hard_data = dataset.tensors[0][hard_indices]  # Indexing on CPU
-    hard_target = dataset.tensors[1][hard_indices]  # Indexing on CPU
-    easy_data = dataset.tensors[0][easy_indices]  # Indexing on CPU
-    easy_target = dataset.tensors[1][easy_indices]  # Indexing on CPU
-
+    hard_data = dataset.tensors[0][hard_indices]
+    hard_target = dataset.tensors[1][hard_indices]
+    easy_data = dataset.tensors[0][easy_indices]
+    easy_target = dataset.tensors[1][easy_indices]
     return hard_data, hard_target, easy_data, easy_target
 
 
 def main(dataset_name: str, strategy: str, runs: int, sample_removal_rates: List[float], remove_hard: bool,
          subset_size: int):
     dataset = load_data_and_normalize(dataset_name, subset_size)
-    confidences_and_energy = load_results(f'Results/{dataset_name}_20_metrics.pkl')
+    confidences_and_energy = load_results(f'Results/Confidences/{dataset_name}_20_metrics.pkl')
     results = {setting: {reduce_train_ratio: [] for reduce_train_ratio in sample_removal_rates}
                for setting in ['full', 'hard', 'easy']}
-    filename = f'Results/straggler_indices_{dataset_name}_20.pkl'
+    filename = f'Results/Stragglers/straggler_indices_{dataset_name}_20.pkl'
     hard_data, hard_target, easy_data, easy_target = find_universal_stragglers(dataset, filename)
-    print(len(hard_data))
+    print(f'Found {len(hard_data)} stragglers.')
     if strategy != 'stragglers':
         hard_data, hard_target, easy_data, easy_target = \
             identify_hard_samples_with_confidences_or_energies(confidences_and_energy, dataset, strategy,

@@ -62,7 +62,7 @@ def main():
         plot_threshold(threshold_data, threshold_name)
     plot_results2(results2)
 
-    plt.xlabel('Percentage of hard samples removed trom the training set')
+    plt.xlabel('Percentage of hard samples randomly removed from the training set')
     plt.ylabel('Accuracy')
 
     legend_items = []

@@ -44,7 +44,7 @@ def main(dataset_name: str, runs: int):
         final_results.append(confidences_and_energies)
         current_metrics = utils.test(my_models[i], full_loader)
         print(current_metrics)
-    utils.save_data(final_results, f"Results/{dataset_name}_{runs}_metrics.pkl")
+    utils.save_data(final_results, f"Results/Confidences/{dataset_name}_{runs}_metrics.pkl")
 
 
 if __name__ == '__main__':

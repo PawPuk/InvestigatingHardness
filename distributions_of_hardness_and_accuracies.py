@@ -32,19 +32,14 @@ def load_data(dataset_name: str):
     """
     Load and normalize datasets based on the dataset name.
     """
-    if dataset_name in ['MNIST', 'FashionMNIST', 'KMNIST']:
-        transform = transforms.Compose([
+    mean = (0.1307,) if dataset_name == 'MNIST' else (0.1918,) if dataset_name == 'KMNIST' \
+        else (0.2860,) if dataset_name == 'FashionMNIST' else (0.4914, 0.4822, 0.4465)
+    std = (0.3081,) if dataset_name == 'MNIST' else (0.3385,) if dataset_name == 'KMNIST' \
+        else (0.3205,) if dataset_name == 'FashionMNIST' else (0.2023, 0.1994, 0.2010)
+    transform = transforms.Compose([
             transforms.ToTensor(),
-            transforms.Normalize((0.5,), (0.5,))
-        ])
-    elif dataset_name == 'CIFAR10':
-        transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
-        ])
-    else:
-        raise ValueError("Unsupported dataset")
-
+            transforms.Normalize(mean, std)
+    ])
     train_set = datasets.__dict__[dataset_name](root='./data', train=True, download=True, transform=transform)
     test_set = datasets.__dict__[dataset_name](root='./data', train=False, download=True, transform=transform)
     return train_set, test_set
@@ -107,14 +102,13 @@ def find_universal_stragglers(dataset: TensorDataset, filename: str,
 
 def main(dataset_name: str, thresholds: List[float], strategy: str, runs: int, depends_on_stragglers: bool):
     confidences_and_energies = load_results(f'Results/{dataset_name}_20_metrics.pkl')
-    dataset = load_data_and_normalize(dataset_name, 70000)
+    full_dataset = load_data_and_normalize(dataset_name, 70000)
     if dataset_name != 'CIFAR10':
         filename = f'Results/straggler_indices_{dataset_name}_20.pkl'
-        _, hard_target, _, _ = find_universal_stragglers(dataset, filename)
-    full_dataset = load_data_and_normalize(dataset_name, 70000)
+        _, hard_target, _, _ = find_universal_stragglers(full_dataset, filename)
     train_set, test_set = load_data(dataset_name)
     train_loader = DataLoader(train_set, batch_size=128, shuffle=True)
-    test_loader = DataLoader(test_set, batch_size=128, shuffle=False)
+    test_loader = DataLoader(test_set, batch_size=len(test_set), shuffle=False)
     results = {'class_level_accuracies': [], 'hardness_distribution': []}
     if strategy == 'stragglers':
         results['hardness_distribution'].append(compute_hardness_distribution(hard_target))

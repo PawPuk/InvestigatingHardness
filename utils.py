@@ -55,12 +55,13 @@ def load_data_and_normalize(dataset_name: str, subset_size: int) -> TensorDatase
     test_dataset = getattr(datasets, dataset_name)(root="./data", train=False, download=True,
                                                    transform=transforms.ToTensor())
     if dataset_name == 'CIFAR10':
-        train_dataset.data = torch.tensor(train_dataset.data).permute(0, 3, 1, 2)
-        test_dataset.data = torch.tensor(test_dataset.data).permute(0, 3, 1, 2)
+        train_data = torch.tensor(train_dataset.data).permute(0, 3, 1, 2).float()
+        test_data = torch.tensor(test_dataset.data).permute(0, 3, 1, 2).float()
+    else:
+        train_data = train_dataset.data.unsqueeze(1).float()
+        test_data = test_dataset.data.unsqueeze(1).float()
     # Concatenate train and test datasets
-    full_data = torch.cat([train_dataset.data.unsqueeze(1).float(), test_dataset.data.unsqueeze(1).float()])
-    if dataset_name == 'CIFAR10':
-        full_data = full_data.squeeze(1)
+    full_data = torch.cat([train_data, test_data])
     full_targets = torch.cat([torch.tensor(train_dataset.targets), torch.tensor(test_dataset.targets)])
     # Shuffle the combined dataset
     np.random.seed(42)
@@ -119,7 +120,6 @@ def test(model: torch.nn.Module, loader: DataLoader) -> float:
             _, predicted = torch.max(outputs.data, 1)  # Get the index of the max log-probability
             total += target.size(0)  # Increment the total count
             correct += (predicted == target).sum().item()  # Increment the correct count
-
     accuracy = 100 * correct / total
     return round(accuracy, 2)
 
@@ -315,12 +315,14 @@ def investigate_within_class_imbalance_common(networks: int, hard_data: Tensor, 
         print()
 
 
-def investigate_within_class_imbalance_edge(data: Tensor, targets: Tensor, remove_hard: bool,
+def investigate_within_class_imbalance_edge(networks: int, data: Tensor, targets: Tensor, remove_hard: bool,
                                             sample_removal_rates: List[float], dataset_name: str,
                                             current_metrics: Dict[float, List]):
     """ In this function we want to measure the effect of changing the number of easy/hard samples on the accuracy on
     the test set for distinct train:test ratio (where train:test ratio is passed as a parameter). The experiments are
     repeated multiple times to ensure that they are initialization-invariant.
+
+    :param networks: defines how many networks will be trained for statistical significance
     :param data: data samples sorted by their average confidence (over models computed with compute_confidences.py)
     :param targets: labels corresponding to the sorted data samples
     :param remove_hard: flag indicating whether we want to see the effect of changing the number of easy (False) or
@@ -332,7 +334,7 @@ def investigate_within_class_imbalance_edge(data: Tensor, targets: Tensor, remov
     for sample_removal_rate in tqdm(sample_removal_rates, desc='Sample removal rates'):
         train_loader, test_loader = split_data(data, targets, remove_hard, sample_removal_rate)
         # We train multiple times to make sure that the performance is initialization-invariant
-        for _ in range(20):
+        for _ in range(networks):
             models, optimizers = initialize_models(dataset_name)
             train(dataset_name, models[0], train_loader, optimizers[0])
             print(f'Accuracies for {sample_removal_rate} % of {["easy", "hard"][remove_hard]} samples removed from '
@@ -342,31 +344,6 @@ def investigate_within_class_imbalance_edge(data: Tensor, targets: Tensor, remov
             print(f'    Achieved {accuracy}% accuracy on the test set.')
             current_metrics[sample_removal_rate].append(accuracy)
         print()
-
-
-def identify_hard_samples_by_confidences(confidences: List[List[float]], dataset, threshold: float) -> List[Tensor]:
-    # TODO: This doesn't work with the enw version of confidences.
-    transposed_confidences = list(zip(*confidences))
-    # Calculate mean confidence per sample
-    average_confidences = [sum(sample_confidences) / len(sample_confidences) for sample_confidences in
-                           transposed_confidences]
-    # Number of samples to include in the least confident subset
-    num_least_confident = int(threshold * len(average_confidences))
-    # Sort indices by average confidence, ascending (least confident first)
-    sorted_indices = sorted(range(len(average_confidences)), key=lambda i: average_confidences[i])
-    # Divide indices into least and most confident based on the threshold
-    least_confident_indices = sorted_indices[:num_least_confident]
-    most_confident_indices = sorted_indices[num_least_confident:]
-    # Reverse the most confident indices to start with the most confident
-    most_confident_indices = most_confident_indices[::-1]
-    # Extract data and targets from dataset
-    data, targets = dataset.tensors
-    # Extract least and most confident data and targets
-    least_confident_data = data[least_confident_indices]
-    least_confident_targets = targets[least_confident_indices]
-    most_confident_data = data[most_confident_indices]
-    most_confident_targets = targets[most_confident_indices]
-    return [least_confident_data, least_confident_targets, most_confident_data, most_confident_targets]
 
 
 def find_stragglers(dataset: TensorDataset):
@@ -418,9 +395,11 @@ def identify_hard_samples_with_confidences_or_energies(confidences_and_energies,
         sorted_indices = sorted(range(num_samples), key=lambda i1: avg_confidences[i1], reverse=False)
     else:
         sorted_indices = sorted(range(num_samples), key=lambda i1: avg_energies[i1], reverse=True)
-    # Use the total number of stragglers as a threshold to divide data into hard and easy samples
+    # Use the threshold to divide data into hard and easy samples
     hard_indices = sorted_indices[:threshold]
     easy_indices = sorted_indices[threshold:]
+    # Reverse the easy indices to start with the easiest
+    easy_indices = easy_indices[::-1]
     # Assign data to hard and easy based on these indices
     all_data = dataset.tensors[0]
     all_targets = dataset.tensors[1]
