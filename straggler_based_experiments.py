@@ -50,7 +50,7 @@ def main(dataset_name: str, strategy: str, runs: int, sample_removal_rates: List
     print(f'A total of {len(hard_data)} hard samples and {len(easy_data)} easy samples were found.')
     investigate_within_class_imbalance_common(runs, hard_data, hard_target, easy_data, easy_target, remove_hard,
                                               sample_removal_rates, dataset_name, results)
-    save_data(results, f"{dataset_name}_{strategy}_{remove_hard}_{subset_size}_metrics.pkl")
+    save_data(results, f"Results/Generalizations/{dataset_name}_{strategy}_{remove_hard}_{subset_size}_metrics.pkl")
 
 
 if __name__ == "__main__":
