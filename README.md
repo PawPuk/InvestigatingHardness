@@ -15,8 +15,8 @@ based on  density, so that it can be generalized to setting more similar to the 
    4. If the models did not achieve an average accuracy of over $99\%$, then sample a single point from $\mathcal{N}$ 
    into the training dataset and retrain the models from scratch.
    5. Repeat the above five times for statistical significance.
-3. The average (over five runs) of the numbers of samples required from $\mathcal{N}$ to achieve an average of over 
-$99\%$ accuracy is our estimate for sample complexity for $\mathcal{N}$.
+3. The average (over five runs) of the numbers of samples required from $\mathcal{N}$ to achieve an average of 
+over $99\%$ accuracy is our estimate for sample complexity for $\mathcal{N}$.
 
 ## Requirements
 
