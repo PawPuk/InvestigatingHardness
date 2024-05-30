@@ -56,3 +56,18 @@ As mentioned in our paper, we notice a bias in which the model performs better o
 circles (left). This means that majority of the paths along the loss landscape taken by the model result in the decision
 functions that are curved towards the left side. In our initial experiments we did not find an experimental setting in
 which this bias would be reversed (further experiments are required).
+
+# Figure 3 - Hardness-based within-class data imbalance on CIFAR10
+
+Generating Figure 3 is a three-step process. We firstly have to compute the confidences using `compute_confidences.py`, 
+and then run `investigate_hardness_common_case.py` and `investigate_hardness_edge_case.py`, making sure that we specify
+that we want those programs to be run on CIFAR10 (add `--dataset_name CIFAR10`). `compute_confidences.py` works as 
+follows:
+
+1. Load the entire dataset specified by `dataset_name` and normalize it. We are combining training and test data.
+2. Initialize 20 models (5 instances of 4 different architectures differing based on the dataset used).
+3. Iterate through models.
+   1. Train model on the entire dataset.
+   2. Compute and save confidences and energies for every data sample
+
+The results are saved in the `Results/Confidences` folder.

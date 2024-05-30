@@ -42,6 +42,7 @@ def main(dataset_name: str, runs: int):
         utils.train(dataset_name, my_models[i], full_loader, optimizers[i])
         confidences_and_energies = compute_confidences_and_energies(my_models[i], full_loader)
         final_results.append(confidences_and_energies)
+        # This part is just for sanity check (to make sure the training converged).
         current_metrics = utils.test(my_models[i], full_loader)
         print(current_metrics)
     utils.save_data(final_results, f"Results/Confidences/{dataset_name}_{runs}_metrics.pkl")
@@ -49,7 +50,11 @@ def main(dataset_name: str, runs: int):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='')
-    parser.add_argument('--dataset_name', type=str, default='MNIST')
-    parser.add_argument('--runs', type=int, default=20)
+    parser.add_argument('--dataset_name', type=str, default='MNIST',
+                        choices=['MNIST', 'KMNIST', 'FashionMNIST', 'CIFAR10'],
+                        help='Specifies which dataset to run the experiment on. We limit the amount of available '
+                             'datasets to the ones we tested, but the code should generalize to other datasets, with '
+                             'similar dimensions.')
+    parser.add_argument('--runs', type=int, default=20, help='A primitive way to reduce the computational complexity.')
     args = parser.parse_args()
     main(**vars(args))
