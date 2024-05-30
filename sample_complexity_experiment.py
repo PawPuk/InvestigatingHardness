@@ -166,7 +166,6 @@ class SampleComplexityEstimator:
 
     @staticmethod
     def plot_data_with_neighborhoods(neighborhoods, train_dataset, sample_complexities):
-        # Create a figure and a set of subplots
         fig, ax = plt.subplots()
         # Extract data points and labels from the training dataset
         data_points = train_dataset.tensors[0].cpu().numpy()
@@ -175,10 +174,10 @@ class SampleComplexityEstimator:
         class_0_indices = labels == 0
         class_1_indices = labels == 1
         ax.scatter(data_points[class_0_indices, 0], data_points[class_0_indices, 1],
-                   c='green', marker='o', s=20)  # Blue circles for class 0
+                   c='green', marker='o', s=20)  # Green circles for class 0
         ax.scatter(data_points[class_1_indices, 0], data_points[class_1_indices, 1],
-                   c='orange', marker='x', s=20)  # Red crosses for class 1
-        # Create a color map for the rectangles
+                   c='orange', marker='x', s=20)  # Orange crosses for class 1
+        # Create a color map for the rectangles (this will be used to visualize estimated sample complexities)
         norm = Normalize(vmin=min(sample_complexities), vmax=max(sample_complexities))
         cmap = plt.get_cmap('viridis')
         # Draw rectangles for each neighborhood
@@ -188,7 +187,7 @@ class SampleComplexityEstimator:
             rect = patches.Rectangle((x_start, y_start), x_end - x_start, y_end - y_start, linewidth=2,
                                      edgecolor='black', facecolor=cmap(norm(sample_complexities[idx])), alpha=0.3)
             ax.add_patch(rect)
-        # Adding colorbar based on the sample complexities
+        # Adding colorbar based on the estimated sample complexities
         sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
         sm.set_array([])
         cbar = plt.colorbar(sm, ax=ax)
@@ -199,10 +198,8 @@ class SampleComplexityEstimator:
 
     def main(self, dataset, a, samples_per_neighbourhood, threshold, init, opt, lr, wd, epochs, runs, networks):
         results = []
-        # Assuming neighborhoods are already defined:
         neighborhoods = self.define_neighbourhood_bounds(dataset, a, samples_per_neighbourhood)
         train_dataset, indices_list = self.create_dataloader_from_neighborhoods(neighborhoods)
-        # Initialize necessary variables
         final_estimated_sample_complexities = []
         criterion = nn.BCELoss()
         # Estimate sample complexity of all neighbourhoods
@@ -234,7 +231,7 @@ class SampleComplexityEstimator:
                     test_dataloader = DataLoader(test_dataset, batch_size=100, shuffle=False)
                     # Evaluate each model
                     accuracies = [self.evaluate_model(model, test_dataloader) for model in models]
-                    # Check if min accuracy is above threshold
+                    # Check if average accuracy is above the threshold
                     if (sum(accuracies) / len(accuracies)) >= threshold:
                         break
                     # Increment sample complexity if not achieved
@@ -251,23 +248,25 @@ class SampleComplexityEstimator:
                   f"{estimated_sample_complexities}) to achieve over {threshold}% min accuracy (over ensemble of "
                   f"10 networks)on randomly generated data from the neighbourhood.")
             final_estimated_sample_complexities.append(estimated_sample_complexity)
-        utils.save_data(results, f'Results/estimated_sample_complexities{dataset}.pkl')
-        # Normalize color map based on the maximum additional samples needed
+        utils.save_data(results, f'Results/SampleComplexities/estimated_sample_complexities{dataset}.pkl')
         self.plot_data_with_neighborhoods(neighborhoods, train_dataset, final_estimated_sample_complexities)
         plt.savefig(f'Figures/{dataset}_a_{a}_samples_{samples_per_neighbourhood}_t_{threshold}_init_{init}_opt_{opt}_'
                     f'lr_{lr}_epochs_{epochs}_runs_{runs}_networks_{networks}.pdf')
+        plt.savefig(f'Figures/{dataset}_a_{a}_samples_{samples_per_neighbourhood}_t_{threshold}_init_{init}_opt_{opt}_'
+                    f'lr_{lr}_epochs_{epochs}_runs_{runs}_networks_{networks}.png')
 
 
 def main(dataset):
     estimator = SampleComplexityEstimator()
-    for i, samples in enumerate([3]):
-        estimator.main(dataset, a=0.5, samples_per_neighbourhood=samples, threshold=99, init=2, opt='ADAM', lr=0.01,
-                       wd=1e-4, epochs=100, runs=5, networks=10)
+    estimator.main(dataset, a=0.5, samples_per_neighbourhood=3, threshold=99, init=2, opt='ADAM', lr=0.01, wd=1e-4,
+                   epochs=100, runs=5, networks=10)
     plt.show()
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='')
-    parser.add_argument('--dataset', type=int, choices=[1, 2, 3, 4], default=4)
+    parser.add_argument('--dataset', type=int, choices=[1, 2, 3, 4], default=1,
+                        help='Specifies which toy dataset to use for the experiment. The only allowed options are '
+                             '1, 2, 3, and 4.')
     args = parser.parse_args()
     main(**vars(args))
