@@ -65,9 +65,29 @@ that we want those programs to be run on CIFAR10 (add `--dataset_name CIFAR10`).
 follows:
 
 1. Load the entire dataset specified by `dataset_name` and normalize it. We are combining training and test data.
-2. Initialize 20 models (5 instances of 4 different architectures differing based on the dataset used).
+2. Initialize 20 models - 5 instances of 4 different architectures differing based on the dataset used 
+(see the initialize_models() function in [utils.py](utils.py)).
 3. Iterate through models.
    1. Train model on the entire dataset.
    2. Compute and save confidences and energies for every data sample
 
 The results are saved in the `Results/Confidences` folder.
+
+## Running the Code
+
+To compute the confidence on CIFAR10 use the following command in your terminal:
+
+```bash
+python sample_complexity_experiment.py --dataset_name CIFAR10
+```
+
+The above takes around 5-6 hours on NVIDIA A100 GPU and 8GB of GPU RAM.
+
+This code was also used to generate other Figures, as computing the confidences and energies is the first part of 
+almost all our experiments - they enable us to identify hard/easy samples using the confidence-based approach from 
+Curriculum Learning.
+
+### Parameters
+
+- `--dataset_name`: Specifies which dataset to use in the experiment. This must be a string. The possible choices are
+`'MNIST'`, `'KMNIST'`, `'FashionMNIST'`, and `'CIFAR10'`. 
