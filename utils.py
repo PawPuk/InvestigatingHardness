@@ -81,7 +81,7 @@ def load_data_and_normalize(dataset_name: str, subset_size: int) -> TensorDatase
 
 
 def initialize_models(dataset_name: str,
-                      number_of_instances: int = 5) -> Tuple[List[Union[torch.nn.Module, SimpleNN]], List[Adam, SGD]]:
+                      number_of_instances: int = 5) -> Tuple[List[Union[torch.nn.Module, SimpleNN]], List[Adam]]:
     if dataset_name == 'CIFAR10':
         model_names = [
             "cifar10_resnet56",
