@@ -5,7 +5,7 @@ from typing import List
 import tqdm
 
 from utils import load_data_and_normalize, identify_hard_samples_with_confidences_or_energies, \
-    investigate_within_class_imbalance_common, load_results
+    investigate_within_class_imbalance_common, load_results, save_data
 
 
 def main(dataset_name: str, thresholds: List[float], runs: int, sample_removal_rates: List[float], remove_hard: bool):
@@ -25,9 +25,7 @@ def main(dataset_name: str, thresholds: List[float], runs: int, sample_removal_r
                                                   sample_removal_rates, dataset_name, current_accuracies)
         # After each train_ratio, add the collected metrics to the all_metrics dictionary
         accuracies[threshold] = current_accuracies
-    metrics_filename = f"{dataset_name}_{remove_hard}_metrics.pkl"
-    with open(metrics_filename, 'wb') as f:
-        pickle.dump(accuracies, f)
+    save_data(accuracies, f"{dataset_name}_{remove_hard}_metrics.pkl")
 
 
 if __name__ == "__main__":

@@ -195,6 +195,8 @@ def split_data(data: Tensor, targets: Tensor, remove_hard: bool,
     samples will be removed from the pool of hard samples when generating train set, when reduce_hard == True)
     :return: returns train loader and test loader
     """
+    # TODO: currently we remove the easiest/hardest samples as the last ones. It should be good to also do it the
+    #  other way around for comparison's sake.
     if not remove_hard:
         data, targets = torch.flip(data, dims=[0]), torch.flip(targets, dims=[0])
     # Split data into initial train/test sets (use 10k test samples)
@@ -338,11 +340,12 @@ def investigate_within_class_imbalance_edge(networks: int, data: Tensor, targets
         train_loader, test_loader = split_data(data, targets, remove_hard, sample_removal_rate)
         # We train multiple times to make sure that the performance is initialization-invariant
         for _ in range(networks):
-            models, optimizers = initialize_models(dataset_name)
+            models, optimizers = initialize_models(dataset_name, 1)
+            # We train only using ResNet56 or LeNet (depending on dataset); to change that change the 0 below.
             train(dataset_name, models[0], train_loader, optimizers[0])
             print(f'Accuracies for {sample_removal_rate} % of {["easy", "hard"][remove_hard]} samples removed from '
                   f'training set.')
-            # Evaluate the model on test set
+            # Evaluate the model on test set (all the data, as the test set contains only hard or only easy samples)
             accuracy = test(models[0], test_loader)
             print(f'    Achieved {accuracy}% accuracy on the test set.')
             current_metrics[sample_removal_rate].append(accuracy)

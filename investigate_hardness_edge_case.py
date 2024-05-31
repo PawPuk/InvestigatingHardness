@@ -4,17 +4,12 @@ from typing import List, Tuple
 
 from torch import Tensor
 
-from utils import load_data_and_normalize, investigate_within_class_imbalance_edge
-
-
-def load_results(filename):
-    with open(filename, 'rb') as f:
-        return pickle.load(f)
+from utils import load_data_and_normalize, load_results, investigate_within_class_imbalance_edge, save_data
 
 
 def sort_dataset_by_confidence(confidences_and_energies: List[List[Tuple[float, float]]],
                                dataset) -> Tuple[Tensor, Tensor]:
-    # Extract confidences and ignore energies for now
+    # Extract confidences and ignore energies
     transposed_confidences = list(zip(*[[ce[0] for ce in run_results] for run_results in confidences_and_energies]))
     # Calculate mean confidence per sample
     average_confidences = [sum(sample_confidences) / len(sample_confidences)
@@ -28,16 +23,15 @@ def sort_dataset_by_confidence(confidences_and_energies: List[List[Tuple[float, 
     return sorted_data, sorted_targets
 
 
-def main(dataset_name: str, runs: int, sample_removal_rates: List[float], remove_hard: bool, subset_size: int):
-    dataset = load_data_and_normalize(dataset_name, subset_size)
+def main(dataset_name: str, runs: int, sample_removal_rates: List[float], remove_hard: bool):
+    dataset_size = 60000 if dataset_name == 'CIFAR10' else 70000
+    dataset = load_data_and_normalize(dataset_name, dataset_size)
     confidences = load_results(f'Results/Confidences/{dataset_name}_20_metrics.pkl')
     results = {sample_removal_rate: [] for sample_removal_rate in sample_removal_rates}
     data, targets = sort_dataset_by_confidence(confidences, dataset)
     investigate_within_class_imbalance_edge(runs, data, targets, remove_hard, sample_removal_rates, dataset_name,
                                             results)
-    metrics_filename = f"{dataset_name}_{remove_hard}_{subset_size}_edge_metrics.pkl"
-    with open(metrics_filename, 'wb') as f:
-        pickle.dump(results, f)
+    save_data(results, f"{dataset_name}_{remove_hard}_edge_metrics.pkl")
 
 
 if __name__ == "__main__":
@@ -55,8 +49,5 @@ if __name__ == "__main__":
     parser.add_argument('--remove_hard', action='store_true', default=False,
                         help='Flag indicating whether we want to see the effect of changing the number of easy (False) '
                              'or hard (True) samples.')
-    parser.add_argument('--subset_size', default=70000, type=int,
-                        help='Specifies the subset of the dataset used for the experiments. Later it will be divided '
-                             'into train and testing training and test sets based pm the --train_ratios parameter.')
     args = parser.parse_args()
     main(**vars(args))
