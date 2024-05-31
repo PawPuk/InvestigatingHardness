@@ -31,21 +31,19 @@ def compute_confidences_and_energies(model: torch.nn.Module, loader: DataLoader)
     return results
 
 
-def main(dataset_name: str, runs: int):
+def main(dataset_name: str, model_instances: int):
     dataset = utils.load_data_and_normalize(dataset_name, 70000)
     full_loader = DataLoader(dataset, batch_size=128, shuffle=False)
     final_results = []
-    my_models, optimizers = utils.initialize_models(dataset_name)
+    my_models, optimizers = utils.initialize_models(dataset_name, model_instances)
     for i in tqdm(range(len(my_models))):
-        if i == runs:
-            break
         utils.train(dataset_name, my_models[i], full_loader, optimizers[i])
         confidences_and_energies = compute_confidences_and_energies(my_models[i], full_loader)
         final_results.append(confidences_and_energies)
         # This part is just for sanity check (to make sure the training converged).
         current_metrics = utils.test(my_models[i], full_loader)
         print(current_metrics)
-    utils.save_data(final_results, f"Results/Confidences/{dataset_name}_{runs}_metrics.pkl")
+    utils.save_data(final_results, f"Results/Confidences/{dataset_name}_{model_instances}_metrics.pkl")
 
 
 if __name__ == '__main__':
@@ -55,6 +53,9 @@ if __name__ == '__main__':
                         help='Specifies which dataset to run the experiment on. We limit the amount of available '
                              'datasets to the ones we tested, but the code should generalize to other datasets, with '
                              'similar dimensions.')
-    parser.add_argument('--runs', type=int, default=20, help='A primitive way to reduce the computational complexity.')
+    parser.add_argument('--model_instances', type=int, default=5,
+                        help='Specifies how many instances of each architecture we want to train in our experiment. '
+                             'There are 4 architectures for each dataset type, so the total number of networks is 4 '
+                             'times model_instances.')
     args = parser.parse_args()
     main(**vars(args))

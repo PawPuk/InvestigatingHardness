@@ -80,7 +80,8 @@ def load_data_and_normalize(dataset_name: str, subset_size: int) -> TensorDatase
     return TensorDataset(normalized_subset_data, subset_targets)
 
 
-def initialize_models(dataset_name: str) -> Tuple[List[Union[torch.nn.Module, SimpleNN]], List[Union[Adam, SGD]]]:
+def initialize_models(dataset_name: str,
+                      number_of_instances: int = 5) -> Tuple[List[Union[torch.nn.Module, SimpleNN]], List[Adam, SGD]]:
     if dataset_name == 'CIFAR10':
         model_names = [
             "cifar10_resnet56",
@@ -90,9 +91,10 @@ def initialize_models(dataset_name: str) -> Tuple[List[Union[torch.nn.Module, Si
         ]
         # Create three instances of each model type with fresh initializations
         model_list = [torch.hub.load("chenyaofo/pytorch-cifar-models", model_name, pretrained=False).to(DEVICE)
-                      for model_name in model_names for _ in range(5)]
+                      for model_name in model_names for _ in range(number_of_instances)]
     else:
-        model_list = [model().to(DEVICE) for model in [LeNet, SimpleMLP, SmallCNN, SimpleNN] for _ in range(5)]
+        model_list = [model().to(DEVICE) for model in [LeNet, SimpleMLP, SmallCNN, SimpleNN]
+                      for _ in range(number_of_instances)]
     optimizer_list = [Adam(model.parameters(), lr=0.01, betas=(0.9, 0.999), weight_decay=1e-4) for model in model_list]
     return model_list, optimizer_list
 
@@ -303,11 +305,12 @@ def investigate_within_class_imbalance_common(networks: int, hard_data: Tensor, 
                                                             sample_removal_rate)
         # We train multiple times to make sure that the performance is initialization-invariant
         for _ in range(networks):
-            models, optimizers = initialize_models(dataset_name)
+            models, optimizers = initialize_models(dataset_name, 1)
+            # We train only using ResNet56 or LeNet (depending on dataset); to change that change the 0 below.
             train(dataset_name, models[0], train_loader, optimizers[0])
             print(f'Accuracies for {sample_removal_rate} % of {["easy", "hard"][remove_hard]} samples removed from '
                   f'training set.')
-            # Evaluate the model on test set
+            # Evaluate the model on test set (all samples, hard samples, and easy samples)
             for i in range(3):
                 accuracy = test(models[0], test_loaders[i])
                 print(f'    {generalisation_settings[i]} - {accuracy}%')
@@ -398,8 +401,6 @@ def identify_hard_samples_with_confidences_or_energies(confidences_and_energies,
     # Use the threshold to divide data into hard and easy samples
     hard_indices = sorted_indices[:threshold]
     easy_indices = sorted_indices[threshold:]
-    # Reverse the easy indices to start with the easiest
-    easy_indices = easy_indices[::-1]
     # Assign data to hard and easy based on these indices
     all_data = dataset.tensors[0]
     all_targets = dataset.tensors[1]

@@ -75,19 +75,27 @@ The results are saved in the `Results/Confidences` folder.
 
 ## Running the Code
 
+### Computing confidences
+
 To compute the confidence on CIFAR10 use the following command in your terminal:
 
 ```bash
 python sample_complexity_experiment.py --dataset_name CIFAR10
 ```
 
-The above takes around 5-6 hours on NVIDIA A100 GPU and 8GB of GPU RAM.
+The above takes around 8 hours on NVIDIA A100 GPU and 8GB of GPU RAM.
 
 This code was also used to generate other Figures, as computing the confidences and energies is the first part of 
 almost all our experiments - they enable us to identify hard/easy samples using the confidence-based approach from 
 Curriculum Learning.
 
-### Parameters
+#### Parameters
 
 - `--dataset_name`: Specifies which dataset to use in the experiment. This must be a string. The possible choices are
-`'MNIST'`, `'KMNIST'`, `'FashionMNIST'`, and `'CIFAR10'`. 
+`'MNIST'`, `'KMNIST'`, `'FashionMNIST'`, and `'CIFAR10'`.
+- `--model_instances`: Used to reduce computational complexity at the expense of statistical significance. The program 
+will train 4 times `model_instances` networks (1 for each architecture). Our experiments were conducted on 5 
+`model_instances`, and changing this might result in different results (especially if you use lower number).
+
+### Investigating generalization (common case)
+
