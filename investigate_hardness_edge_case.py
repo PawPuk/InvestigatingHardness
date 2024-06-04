@@ -26,12 +26,12 @@ def sort_dataset_by_confidence(confidences_and_energies: List[List[Tuple[float, 
 def main(dataset_name: str, runs: int, sample_removal_rates: List[float], remove_hard: bool):
     dataset_size = 60000 if dataset_name == 'CIFAR10' else 70000
     dataset = load_data_and_normalize(dataset_name, dataset_size)
-    confidences = load_results(f'Results/Confidences/{dataset_name}_20_metrics.pkl')
+    confidences = load_results(f'Results/Confidences/{dataset_name}_5_metrics.pkl')
     results = {sample_removal_rate: [] for sample_removal_rate in sample_removal_rates}
     data, targets = sort_dataset_by_confidence(confidences, dataset)
     investigate_within_class_imbalance_edge(runs, data, targets, remove_hard, sample_removal_rates, dataset_name,
                                             results)
-    save_data(results, f"{dataset_name}_{remove_hard}_edge_metrics.pkl")
+    save_data(results, f"Results/Generalizations/{dataset_name}_{remove_hard}_{runs}_edge_metrics.pkl")
 
 
 if __name__ == "__main__":

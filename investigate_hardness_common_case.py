@@ -11,7 +11,7 @@ from utils import load_data_and_normalize, identify_hard_samples_with_confidence
 def main(dataset_name: str, thresholds: List[float], runs: int, sample_removal_rates: List[float], remove_hard: bool):
     dataset_size = 60000 if dataset_name == 'CIFAR10' else 70000
     dataset = load_data_and_normalize(dataset_name, dataset_size)
-    confidences = load_results(f'Results/Confidences/{dataset_name}_20_metrics.pkl')
+    confidences = load_results(f'Results/Confidences/{dataset_name}_5_metrics.pkl')
     generalisation_settings = ['full', 'hard', 'easy']
     accuracies = {}
     for idx, threshold in tqdm.tqdm(enumerate(thresholds)):
@@ -25,7 +25,7 @@ def main(dataset_name: str, thresholds: List[float], runs: int, sample_removal_r
                                                   sample_removal_rates, dataset_name, current_accuracies)
         # After each train_ratio, add the collected metrics to the all_metrics dictionary
         accuracies[threshold] = current_accuracies
-    save_data(accuracies, f"{dataset_name}_{remove_hard}_metrics.pkl")
+    save_data(accuracies, f"Results/Generalizations/{dataset_name}_{remove_hard}_{runs}_common_metrics.pkl")
 
 
 if __name__ == "__main__":
