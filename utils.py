@@ -260,7 +260,7 @@ def train_stop_at_inversion(model: SimpleNN, loader: DataLoader, optimizer: SGD,
     return models, inversion_points
 
 
-def train(dataset_name: str, model: Union[SimpleNN, torch.nn.Module], loader: DataLoader, optimizer: Union[Adam, SGD],
+def train(model: Union[SimpleNN, torch.nn.Module], loader: DataLoader, optimizer: Union[Adam, SGD],
           compute_radii: bool = False, epochs=EPOCHS) -> List[Tuple[int, Dict[int, torch.Tensor]]]:
     scheduler = CosineAnnealingLR(optimizer, T_max=epochs)
     epoch_radii = []
@@ -273,8 +273,7 @@ def train(dataset_name: str, model: Union[SimpleNN, torch.nn.Module], loader: Da
             loss = CRITERION(outputs, labels)
             loss.backward()
             optimizer.step()
-        if dataset_name == 'CIFAR10':
-            scheduler.step()
+        scheduler.step()
         # Do not compute the radii for the first 20 epochs, as those can be unstable. The number 20 was taken from
         # https://github.com/marco-gherardi/stragglers
         if compute_radii and epoch > 20:

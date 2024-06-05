@@ -33,7 +33,7 @@ Make sure you have the required libraries installed. You can install them using 
 pip install torch torchvision matplotlib tqdm numpy
 ```
 
-## Running the Code
+## Running the code
 
 To run [sample_complexity_experiment.py](sample_complexity_experiment.py), use the following command in your terminal:
 
@@ -46,7 +46,7 @@ python sample_complexity_experiment.py --dataset [DATASET]
 - `--dataset`: Specifies which dataset to use in the experiment. This must be an integer value. The possible choices are
 1, 2, 3, 4. The default choice is 1 as it's the simplest dataset.
 
-## Expected Results
+## Expected results
 
 When running `python sample_complexity_experiment`, the following result is observed:
 
@@ -71,9 +71,31 @@ follows:
    1. Train model on the entire dataset.
    2. Compute and save confidences and energies for every data sample
 
-The results are saved in the `Results/Confidences` folder.
+The results are saved in the `Results/Confidences` folder. After computing confidences we can move to measuring the 
+impact of easy and hard samples on the perceived generalization. This is done via `investigate_hardness_common_case.py`, 
+and `investigate_hardness_edge_case.py`. In the former, we make sure that ratio of easy:hard samples is the same in 
+training and test sets when we split the data. In the latter, we put the hardest or easiest samples in the test set. We
+define hard samples as the ones that have the lowest average confidence based on the results from `Results/Confidences`.
+`investigate_hardness_common_case.py` works as follows:
 
-## Running the Code
+1. Load the entire dataset specified by `dataset_name` and normalize it. Load confidences for this dataset from 
+`Results/Confidences`.
+2. Divide the dataset into easy and hard samples based on average confidences.
+3. Iterate through sample rate removals.
+   1. Divide easy and hard samples into training and test set, making sure the ratio is the same in both splits. The 
+   current sample removal rate indicates how many easy (or hard; based on the `--remove_hard` flag) samples should be 
+   removed from the training set 
+   2. Train 20 models (ResNet56) on the so-obtained training set
+   3. Evaluate the accuracy on all test samples, hard test samples, and easy test samples
+
+`investigate_hardness_edge_case.py` has an almost identical workflow, with the only distinction being the rule behind 
+splitting the data into the training and test set. Here, we put all the hardest (or easiest; based on the 
+`--remove_hard` flag) in the test set.
+
+Both programs save their results into the `Results/Generalizations/` folder. To plot the obtained results we use 
+`produce_figure3.py`. Below, we give more detailed instruction on how to replicate our results from the paper.
+
+## Running the code
 
 ### Computing confidences
 
@@ -157,7 +179,7 @@ This parameter allows us to modify those thresholds. By default, we use the thre
 means that the top *5*, *10*, and *20* (respectively) percentile of the samples with the lowest average confidence (as 
 measured by the `compute_confidences.py`) will be classified as hard.
 
-## Expected Results
+### Plotting results
 
 To plot the results you should run the following:
 
@@ -177,3 +199,35 @@ generalization; 2) higher performances on easy than hard samples; and 3) tremend
 ratio when splitting the data into training and test set on the perceived generalization.
 
 # Figure 4 - Hardness-based within-class data imbalance on MNIST, KMNIST, and FashionMNIST
+
+To measure the impact of hard and easy samples on the generalization on MNIST, KMNIST, and FashionMNIST we use very 
+similar pipeline. Here, we describe how to replicate the results on MNIST. To work with other datasets all you have to 
+do is modify the `--dataset_name` parameter.
+
+## Running the code
+
+We start of with measuring the confidences with the following:
+
+```bash
+python compute_confidences.py --dataset_name MNIST
+```
+
+This takes around *35* minutes on NVIDIA A100 GPU and *8* GB of GPU RAM. Afterwards, we measure the impact of easy and 
+hard samples on the perceived generalization. We still distinguish common and edge case, based on the easy:hard sample 
+ratio during the creation of training and test sets. However, this time we want to add more methods for identifying hard 
+samples. We add an energy-based and straggler-based methods. The former utilizes the energies instead of confidences 
+(see [here](https://proceedings.neurips.cc/paper/2020/file/f5496252609c43eb8a3d147ab9b9c006-Paper.pdf) for reference). 
+The latter uses the stragglers, which are data sample misclassified by the model when it moves from increasing to 
+decreasing the intra-class variability. The existence of stragglers was discovered in [this](https://www.nature.com/articles/s42256-023-00772-9) 
+paper. Since straggler based approach doesn't require threshold, we use the number of found stragglers as the threshold 
+in the confidence- and energy-based approaches. Due to the addition of those two methods we now have to run the 
+following when working on the common case:
+
+```bash
+python straggler_based_experiments.py --dataset_name MNIST --strategy stragglers
+python straggler_based_experiments.py --dataset_name MNIST --strategy confidence
+python straggler_based_experiments.py --dataset_name MNIST --strategy energy
+python straggler_based_experiments.py --dataset_name MNIST --strategy stragglers --sample_removal_rates 0.0 0.25 0.5 0.75 1.0 --remove_hard
+python straggler_based_experiments.py --dataset_name MNIST --strategy confidence --sample_removal_rates 0.0 0.25 0.5 0.75 1.0 --remove_hard
+python straggler_based_experiments.py --dataset_name MNIST --strategy energy --sample_removal_rates 0.0 0.25 0.5 0.75 1.0 --remove_hard
+```

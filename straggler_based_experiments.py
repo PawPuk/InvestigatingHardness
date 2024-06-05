@@ -34,10 +34,10 @@ def find_universal_stragglers(dataset: TensorDataset, filename: str,
     return hard_data, hard_target, easy_data, easy_target
 
 
-def main(dataset_name: str, strategy: str, runs: int, sample_removal_rates: List[float], remove_hard: bool,
-         subset_size: int):
-    dataset = load_data_and_normalize(dataset_name, subset_size)
-    confidences_and_energy = load_results(f'Results/Confidences/{dataset_name}_20_metrics.pkl')
+def main(dataset_name: str, strategy: str, runs: int, sample_removal_rates: List[float], remove_hard: bool):
+    dataset_size = 60000 if dataset_name == 'CIFAR10' else 70000
+    dataset = load_data_and_normalize(dataset_name, dataset_size)
+    confidences_and_energy = load_results(f'Results/Confidences/{dataset_name}_5_metrics.pkl')
     results = {setting: {reduce_train_ratio: [] for reduce_train_ratio in sample_removal_rates}
                for setting in ['full', 'hard', 'easy']}
     filename = f'Results/Stragglers/straggler_indices_{dataset_name}_20.pkl'
@@ -50,7 +50,7 @@ def main(dataset_name: str, strategy: str, runs: int, sample_removal_rates: List
     print(f'A total of {len(hard_data)} hard samples and {len(easy_data)} easy samples were found.')
     investigate_within_class_imbalance_common(runs, hard_data, hard_target, easy_data, easy_target, remove_hard,
                                               sample_removal_rates, dataset_name, results)
-    save_data(results, f"Results/Generalizations/{dataset_name}_{strategy}_{remove_hard}_{subset_size}_metrics.pkl")
+    save_data(results, f"Results/Generalizations/{dataset_name}_{strategy}_{remove_hard}_{runs}_common_metrics.pkl")
 
 
 if __name__ == "__main__":
@@ -71,8 +71,5 @@ if __name__ == "__main__":
     parser.add_argument('--remove_hard', action='store_true', default=False,
                         help='flag indicating whether we want to see the effect of changing the number of easy (False) '
                              'or hard (True) samples.')
-    parser.add_argument('--subset_size', default=70000, type=int,
-                        help='Specifies the subset of the dataset used for the experiments. Later it will be divided '
-                             'into train and testing training and test sets based pm the --train_ratios parameter.')
     args = parser.parse_args()
     main(**vars(args))
