@@ -37,7 +37,7 @@ def find_universal_stragglers(dataset: TensorDataset, filename: str,
 def main(dataset_name: str, strategy: str, runs: int, sample_removal_rates: List[float], remove_hard: bool):
     dataset_size = 60000 if dataset_name == 'CIFAR10' else 70000
     dataset = load_data_and_normalize(dataset_name, dataset_size)
-    confidences_and_energy = load_results(f'Results/Confidences/{dataset_name}_5_metrics.pkl')
+    confidences_and_energy = load_results(f'Results/Confidences/{dataset_name}_20_metrics.pkl')
     results = {setting: {reduce_train_ratio: [] for reduce_train_ratio in sample_removal_rates}
                for setting in ['full', 'hard', 'easy']}
     filename = f'Results/Stragglers/straggler_indices_{dataset_name}_20.pkl'
