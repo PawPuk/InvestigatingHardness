@@ -353,11 +353,6 @@ def investigate_within_class_imbalance_edge(networks: int, data: Tensor, targets
 
 
 def find_stragglers(dataset: TensorDataset):
-    # The following are used to store all stragglers and non-stragglers
-    hard_data = torch.tensor([], dtype=torch.float32).to(DEVICE)
-    hard_target = torch.tensor([], dtype=torch.long).to(DEVICE)
-    easy_data = torch.tensor([], dtype=torch.float32).to(DEVICE)
-    easy_target = torch.tensor([], dtype=torch.long).to(DEVICE)
     while True:
         model, optimizer = initialize_model()
         loader = transform_datasets_to_dataloaders(dataset)
@@ -374,14 +369,9 @@ def find_stragglers(dataset: TensorDataset):
         data, target = data.to(DEVICE), target.to(DEVICE)
         for class_idx in range(10):
             # Find stragglers and non-stragglers for the class manifold
-            stragglers[class_idx] = ((torch.argmax(models[class_idx](data), dim=1) != target) & (target == class_idx))
-            current_non_stragglers = (torch.argmax(models[class_idx](data), dim=1) == target) & (target == class_idx)
-            # Save stragglers and non-stragglers from class 'class_idx' to the outer scope (outside of this for loop)
-            hard_data = torch.cat((hard_data, data[stragglers[class_idx]]), dim=0)
-            hard_target = torch.cat((hard_target, target[stragglers[class_idx]]), dim=0)
-            easy_data = torch.cat((easy_data, data[current_non_stragglers]), dim=0)
-            easy_target = torch.cat((easy_target, target[current_non_stragglers]), dim=0)
-    return hard_data, hard_target, easy_data, easy_target, stragglers
+            stragglers[class_idx] = ((torch.argmax(models[class_idx](data), dim=1) != target) &
+                                     (target == class_idx)).cpu()
+    return stragglers
 
 
 def identify_hard_samples_with_confidences_or_energies(confidences_and_energies, dataset, strategy, threshold):
