@@ -60,8 +60,8 @@ def plot_results2(results2):
 
 
 def main(remove_hard: bool):
-    results1 = load_results(f'Results/Generalizations/CIFAR10_{remove_hard}_70000_common_metrics.pkl')
-    results2 = load_results(f'Results/Generalizations/CIFAR10_{remove_hard}_70000_edge_metrics.pkl')
+    results1 = load_results(f'Results/Generalizations/CIFAR10_{remove_hard}_20_common_metrics.pkl')
+    results2 = load_results(f'Results/Generalizations/CIFAR10_{remove_hard}_20_edge_metrics.pkl')
     plt.figure(figsize=(12, 8))
 
     for threshold_name, threshold_data in results1.items():
@@ -132,6 +132,7 @@ def main(remove_hard: bool):
     plt.grid(True)
     plt.ylim(0, 100)
     plt.savefig(f'Figures/Section4_{["easy", "hard"][remove_hard]}.pdf')
+    plt.savefig(f'Figures/Section4_{["easy", "hard"][remove_hard]}.png')
     plt.show()
 
 

@@ -80,7 +80,8 @@ def load_data_and_normalize(dataset_name: str, subset_size: int) -> TensorDatase
     return TensorDataset(normalized_subset_data, subset_targets)
 
 
-def initialize_models(dataset_name: str) -> Tuple[List[Union[torch.nn.Module, SimpleNN]], List[Union[Adam, SGD]]]:
+def initialize_models(dataset_name: str,
+                      number_of_instances: int = 5) -> Tuple[List[Union[torch.nn.Module, SimpleNN]], List[Adam]]:
     if dataset_name == 'CIFAR10':
         model_names = [
             "cifar10_resnet56",
@@ -90,9 +91,10 @@ def initialize_models(dataset_name: str) -> Tuple[List[Union[torch.nn.Module, Si
         ]
         # Create three instances of each model type with fresh initializations
         model_list = [torch.hub.load("chenyaofo/pytorch-cifar-models", model_name, pretrained=False).to(DEVICE)
-                      for model_name in model_names for _ in range(5)]
+                      for model_name in model_names for _ in range(number_of_instances)]
     else:
-        model_list = [model().to(DEVICE) for model in [LeNet, SimpleMLP, SmallCNN, SimpleNN] for _ in range(5)]
+        model_list = [model().to(DEVICE) for model in [LeNet, SimpleMLP, SmallCNN, SimpleNN]
+                      for _ in range(number_of_instances)]
     optimizer_list = [Adam(model.parameters(), lr=0.01, betas=(0.9, 0.999), weight_decay=1e-4) for model in model_list]
     return model_list, optimizer_list
 
@@ -193,6 +195,8 @@ def split_data(data: Tensor, targets: Tensor, remove_hard: bool,
     samples will be removed from the pool of hard samples when generating train set, when reduce_hard == True)
     :return: returns train loader and test loader
     """
+    # TODO: currently we remove the easiest/hardest samples as the last ones. It should be good to also do it the
+    #  other way around for comparison's sake.
     if not remove_hard:
         data, targets = torch.flip(data, dims=[0]), torch.flip(targets, dims=[0])
     # Split data into initial train/test sets (use 10k test samples)
@@ -303,11 +307,12 @@ def investigate_within_class_imbalance_common(networks: int, hard_data: Tensor, 
                                                             sample_removal_rate)
         # We train multiple times to make sure that the performance is initialization-invariant
         for _ in range(networks):
-            models, optimizers = initialize_models(dataset_name)
+            models, optimizers = initialize_models(dataset_name, 1)
+            # We train only using ResNet56 or LeNet (depending on dataset); to change that change the 0 below.
             train(dataset_name, models[0], train_loader, optimizers[0])
             print(f'Accuracies for {sample_removal_rate} % of {["easy", "hard"][remove_hard]} samples removed from '
                   f'training set.')
-            # Evaluate the model on test set
+            # Evaluate the model on test set (all samples, hard samples, and easy samples)
             for i in range(3):
                 accuracy = test(models[0], test_loaders[i])
                 print(f'    {generalisation_settings[i]} - {accuracy}%')
@@ -335,11 +340,12 @@ def investigate_within_class_imbalance_edge(networks: int, data: Tensor, targets
         train_loader, test_loader = split_data(data, targets, remove_hard, sample_removal_rate)
         # We train multiple times to make sure that the performance is initialization-invariant
         for _ in range(networks):
-            models, optimizers = initialize_models(dataset_name)
+            models, optimizers = initialize_models(dataset_name, 1)
+            # We train only using ResNet56 or LeNet (depending on dataset); to change that change the 0 below.
             train(dataset_name, models[0], train_loader, optimizers[0])
             print(f'Accuracies for {sample_removal_rate} % of {["easy", "hard"][remove_hard]} samples removed from '
                   f'training set.')
-            # Evaluate the model on test set
+            # Evaluate the model on test set (all the data, as the test set contains only hard or only easy samples)
             accuracy = test(models[0], test_loader)
             print(f'    Achieved {accuracy}% accuracy on the test set.')
             current_metrics[sample_removal_rate].append(accuracy)
@@ -347,11 +353,6 @@ def investigate_within_class_imbalance_edge(networks: int, data: Tensor, targets
 
 
 def find_stragglers(dataset: TensorDataset):
-    # The following are used to store all stragglers and non-stragglers
-    hard_data = torch.tensor([], dtype=torch.float32).to(DEVICE)
-    hard_target = torch.tensor([], dtype=torch.long).to(DEVICE)
-    easy_data = torch.tensor([], dtype=torch.float32).to(DEVICE)
-    easy_target = torch.tensor([], dtype=torch.long).to(DEVICE)
     while True:
         model, optimizer = initialize_model()
         loader = transform_datasets_to_dataloaders(dataset)
@@ -368,14 +369,9 @@ def find_stragglers(dataset: TensorDataset):
         data, target = data.to(DEVICE), target.to(DEVICE)
         for class_idx in range(10):
             # Find stragglers and non-stragglers for the class manifold
-            stragglers[class_idx] = ((torch.argmax(models[class_idx](data), dim=1) != target) & (target == class_idx))
-            current_non_stragglers = (torch.argmax(models[class_idx](data), dim=1) == target) & (target == class_idx)
-            # Save stragglers and non-stragglers from class 'class_idx' to the outer scope (outside of this for loop)
-            hard_data = torch.cat((hard_data, data[stragglers[class_idx]]), dim=0)
-            hard_target = torch.cat((hard_target, target[stragglers[class_idx]]), dim=0)
-            easy_data = torch.cat((easy_data, data[current_non_stragglers]), dim=0)
-            easy_target = torch.cat((easy_target, target[current_non_stragglers]), dim=0)
-    return hard_data, hard_target, easy_data, easy_target, stragglers
+            stragglers[class_idx] = ((torch.argmax(models[class_idx](data), dim=1) != target) &
+                                     (target == class_idx)).cpu()
+    return stragglers
 
 
 def identify_hard_samples_with_confidences_or_energies(confidences_and_energies, dataset, strategy, threshold):
@@ -398,8 +394,6 @@ def identify_hard_samples_with_confidences_or_energies(confidences_and_energies,
     # Use the threshold to divide data into hard and easy samples
     hard_indices = sorted_indices[:threshold]
     easy_indices = sorted_indices[threshold:]
-    # Reverse the easy indices to start with the easiest
-    easy_indices = easy_indices[::-1]
     # Assign data to hard and easy based on these indices
     all_data = dataset.tensors[0]
     all_targets = dataset.tensors[1]

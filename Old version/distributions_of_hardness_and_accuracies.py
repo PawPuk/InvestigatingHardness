@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from torchvision import transforms, datasets
 from tqdm import tqdm
 
-from utils import find_stragglers, identify_hard_samples_with_confidences_or_energies, initialize_models,\
+from utils import identify_hard_samples_with_confidences_or_energies, initialize_models,\
     load_data_and_normalize, load_results, save_data, train
 
 

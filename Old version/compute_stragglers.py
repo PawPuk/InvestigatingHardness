@@ -7,10 +7,11 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def main(dataset_name: str, runs: int):
-    dataset = utils.load_data_and_normalize(dataset_name, 70000)
+    dataset_size = 60000 if dataset_name == 'CIFAR10' else 70000
+    dataset = utils.load_data_and_normalize(dataset_name, dataset_size)
     hard_samples_indices = []
     for _ in tqdm(range(runs)):
-        _, _, _, _, stragglers = utils.find_stragglers(dataset)
+        stragglers = utils.find_stragglers(dataset)
         hard_samples_indices.append(stragglers)
     utils.save_data(hard_samples_indices, f"Results/Stragglers/straggler_indices_{dataset_name}_{runs}.pkl")
 
