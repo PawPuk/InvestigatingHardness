@@ -37,10 +37,10 @@ def find_universal_stragglers(dataset: TensorDataset, filename: str,
 def main(dataset_name: str, strategy: str, runs: int, sample_removal_rates: List[float], remove_hard: bool,
          subset_size: int):
     dataset = load_data_and_normalize(dataset_name, subset_size)
-    confidences_and_energy = load_results(f'Results/Confidences/{dataset_name}_20_metrics.pkl')
+    confidences_and_energy = load_results(f'Old version/Results/Confidences/{dataset_name}_20_metrics.pkl')
     results = {setting: {reduce_train_ratio: [] for reduce_train_ratio in sample_removal_rates}
                for setting in ['full', 'hard', 'easy']}
-    filename = f'Results/Stragglers/straggler_indices_{dataset_name}_20.pkl'
+    filename = f'Old version/Results/Stragglers/straggler_indices_{dataset_name}_20.pkl'
     hard_data, hard_target, easy_data, easy_target = find_universal_stragglers(dataset, filename)
     print(f'Found {len(hard_data)} stragglers.')
     if strategy != 'stragglers':
@@ -50,7 +50,8 @@ def main(dataset_name: str, strategy: str, runs: int, sample_removal_rates: List
     print(f'A total of {len(hard_data)} hard samples and {len(easy_data)} easy samples were found.')
     investigate_within_class_imbalance_common(runs, hard_data, hard_target, easy_data, easy_target, remove_hard,
                                               sample_removal_rates, dataset_name, results)
-    save_data(results, f"Results/Generalizations/{dataset_name}_{strategy}_{remove_hard}_{subset_size}_metrics.pkl")
+    save_data(results,
+              f"Old version/Results/Generalizations/{dataset_name}_{strategy}_{remove_hard}_{subset_size}_metrics.pkl")
 
 
 if __name__ == "__main__":

@@ -75,12 +75,13 @@ def main(dataset_name: str, remove_hard: bool, network: str):
     fillstyles = ['full', 'full', 'none']  # Fill styles for each marker type
 
     # Load and plot edge results with black solid line and hexagonal marker
-    edge_results = load_results(f'Results/Generalizations/{network}/{dataset_name}_{remove_hard}_70000_edge_metrics.pkl')
+    edge_results = load_results(
+        f'Old version/Results/Generalizations/{network}/{dataset_name}_{remove_hard}_70000_edge_metrics.pkl')
     plot_results(edge_results, ax, 'Edge Results', 'black', 'H', '-', 'full')  # Hexagonal marker for edge results
 
     for i, result_type in enumerate(result_types):
         results = load_results(
-            f'Results/Generalizations/{network}/{dataset_name}_{result_type}_{"True" if remove_hard else "False"}_'
+            f'Old version/Results/Generalizations/{network}/{dataset_name}_{result_type}_{"True" if remove_hard else "False"}_'
             f'70000_metrics.pkl')
         plot_results(results['hard'], ax, f'{result_type.capitalize()} (Hard)', colors[i], markers[i], linestyles[0], fillstyles[i])
         plot_results(results['easy'], ax, f'{result_type.capitalize()} (Easy)', colors[i], markers[i], linestyles[1], fillstyles[i])

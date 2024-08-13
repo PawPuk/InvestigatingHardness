@@ -30,7 +30,7 @@ def sort_dataset_by_confidence(confidences_and_energies: List[List[Tuple[float, 
 
 def main(dataset_name: str, runs: int, sample_removal_rates: List[float], remove_hard: bool, subset_size: int):
     dataset = load_data_and_normalize(dataset_name, subset_size)
-    confidences = load_results(f'Results/Confidences/{dataset_name}_20_metrics.pkl')
+    confidences = load_results(f'Old version/Results/Confidences/{dataset_name}_20_metrics.pkl')
     results = {sample_removal_rate: [] for sample_removal_rate in sample_removal_rates}
     data, targets = sort_dataset_by_confidence(confidences, dataset)
     investigate_within_class_imbalance_edge(runs, data, targets, remove_hard, sample_removal_rates, dataset_name,

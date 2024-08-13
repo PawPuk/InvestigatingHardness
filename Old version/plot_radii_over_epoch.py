@@ -43,7 +43,7 @@ def plot_mean_std_radii(mean_radii, std_radii, dataset_name):
 
 
 def main(dataset_name):
-    all_epoch_radii = load_results(f'Results/Radii_over_epoch/all_epoch_radii_20000{dataset_name}.pkl')
+    all_epoch_radii = load_results(f'Old version/Results/Radii_over_epoch/all_epoch_radii_20000{dataset_name}.pkl')
     mean_radii, std_radii = compute_statistics(all_epoch_radii)
     plot_mean_std_radii(mean_radii, std_radii, dataset_name)
 

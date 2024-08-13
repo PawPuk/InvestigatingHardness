@@ -251,7 +251,7 @@ class SampleComplexityEstimator:
                   f"{estimated_sample_complexities}) to achieve over {threshold}% min accuracy (over ensemble of "
                   f"10 networks)on randomly generated data from the neighbourhood.")
             final_estimated_sample_complexities.append(estimated_sample_complexity)
-        utils.save_data(results, f'Results/estimated_sample_complexities{dataset}.pkl')
+        utils.save_data(results, f'Old version/Results/estimated_sample_complexities{dataset}.pkl')
         # Normalize color map based on the maximum additional samples needed
         self.plot_data_with_neighborhoods(neighborhoods, train_dataset, final_estimated_sample_complexities)
         plt.savefig(f'Figures/{dataset}_a_{a}_samples_{samples_per_neighbourhood}_t_{threshold}_init_{init}_opt_{opt}_'

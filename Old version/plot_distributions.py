@@ -57,7 +57,7 @@ def main(dataset_name, network):
     distributions = {}
 
     if dataset_name == 'CIFAR10':
-        result = load_results(f'Results/Distributions/LeNet/distributions_confidence_{dataset_name}.pkl')
+        result = load_results(f'Old version/Results/Distributions/LeNet/distributions_confidence_{dataset_name}.pkl')
         all_accuracies = result['class_level_accuracies']
         distributions['0.05'] = result['hardness_distribution'][0]
         distributions['0.1'] = result['hardness_distribution'][1]
@@ -68,11 +68,13 @@ def main(dataset_name, network):
             raise ValueError("PureLeNet can only be used with MNIST or KMNIST datasets.")
         net_dir = 'PureLeNet' if network == 'PureLeNet' else 'SimpleNN' if network == 'SimpleNN' else 'LeNet'
         for strategy in ['confidence', 'energy']:
-            result = load_results(f'Results/Distributions/{net_dir}/distributions_{strategy}_{dataset_name}.pkl')
+            result = load_results(
+                f'Old version/Results/Distributions/{net_dir}/distributions_{strategy}_{dataset_name}.pkl')
             results.append(result)
 
         # Always load 'stragglers' from LeNet directory
-        stragglers_result = load_results(f'Results/Distributions/LeNet/distributions_stragglers_{dataset_name}.pkl')
+        stragglers_result = load_results(
+            f'Old version/Results/Distributions/LeNet/distributions_stragglers_{dataset_name}.pkl')
         results.append(stragglers_result)
 
         all_accuracies = []

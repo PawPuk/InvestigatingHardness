@@ -101,10 +101,10 @@ def find_universal_stragglers(dataset: TensorDataset, filename: str,
 
 
 def main(dataset_name: str, thresholds: List[float], strategy: str, runs: int, depends_on_stragglers: bool):
-    confidences_and_energies = load_results(f'Results/Confidences/{dataset_name}_20_metrics.pkl')
+    confidences_and_energies = load_results(f'Old version/Results/Confidences/{dataset_name}_20_metrics.pkl')
     full_dataset = load_data_and_normalize(dataset_name, 70000)
     if dataset_name != 'CIFAR10':
-        filename = f'Results/Stragglers/straggler_indices_{dataset_name}_20.pkl'
+        filename = f'Old version/Results/Stragglers/straggler_indices_{dataset_name}_20.pkl'
         _, hard_target, _, _ = find_universal_stragglers(full_dataset, filename)
     train_set, test_set = load_data(dataset_name)
     train_loader = DataLoader(train_set, batch_size=128, shuffle=True)
@@ -132,7 +132,8 @@ def main(dataset_name: str, thresholds: List[float], strategy: str, runs: int, d
         accuracies = compute_class_accuracy(model, test_loader)
         print(f'Class-level accuracies - {accuracies}')
         results['class_level_accuracies'].append(accuracies)
-    save_data(results, f'Results/Distributions/distributions_{strategy}_{dataset_name}_{depends_on_stragglers}.pkl')
+    save_data(results,
+              f'Old version/Results/Distributions/distributions_{strategy}_{dataset_name}_{depends_on_stragglers}.pkl')
 
 
 if __name__ == '__main__':
