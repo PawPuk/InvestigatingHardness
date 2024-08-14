@@ -1,6 +1,6 @@
 import argparse
 import os
-from typing import List
+from typing import List, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -12,7 +12,6 @@ from tqdm import tqdm
 from neural_networks import LeNet
 import utils as u
 
-
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 np.random.seed(42)
 torch.manual_seed(42)
@@ -23,27 +22,42 @@ CONFIDENCES_SAVE_DIR = "confidences/"
 os.makedirs(CONFIDENCES_SAVE_DIR, exist_ok=True)
 
 
-def compute_bma_confidences(models: List[torch.nn.Module], loader: DataLoader, weights: List[float]) -> List[float]:
-    """Compute Bayesian averages of models' confidences on the entire dataset."""
+def compute_hardness_indicators(models: List[torch.nn.Module], loader: DataLoader,
+                                weights: List[float]) -> List[Tuple[float, float, bool]]:
+    """Compute BMA of confidences, margins, and track whether each sample was misclassified."""
     results = []
     with torch.no_grad():
-        for data, _ in tqdm(loader, desc='Computing BMA confidences'):
-            data = data.to(DEVICE)
+        for data, targets in tqdm(loader, desc='Computing BMA confidences, margins, and misclassifications'):
+            data, targets = data.to(DEVICE), targets.to(DEVICE)
             weighted_confidences = []
+            weighted_margins = []
+            all_predictions = []
             for model, weight in zip(models, weights):
                 model.eval()
                 outputs = model(data)
                 probabilities = torch.nn.functional.softmax(outputs, dim=1)
-                max_probs = torch.max(probabilities, dim=1)[0]
+                max_probs, max_indices = torch.max(probabilities, dim=1)
+                second_max_probs = torch.topk(probabilities, 2, dim=1)[0][:, 1]
+
                 weighted_confidences.append(weight * max_probs.cpu().numpy())
-            # Compute and store Bayesian Model Average of confidences
+                weighted_margins.append(weight * (max_probs - second_max_probs).cpu().numpy())
+                all_predictions.append(max_indices)
+            # Compute and store Bayesian Model Averages
             avg_confidences = np.sum(weighted_confidences, axis=0)
-            results.extend(avg_confidences)
+            avg_margins = np.sum(weighted_margins, axis=0)
+            # Majority vote for ensemble prediction
+            ensemble_predictions = torch.stack(all_predictions).mode(dim=0)[0]
+            misclassifications = ensemble_predictions != targets
+
+            results.extend(zip(avg_confidences, avg_margins, misclassifications.cpu().numpy()))
     return results
 
 
-def show_lowest_confidence_samples(dataset: TensorDataset, confidences: List[float], labels: List[Tensor], n=30):
+def show_lowest_confidence_samples(dataset: TensorDataset,
+                                   confidences_margins_misclassifications: List[Tuple[float, float, bool]],
+                                   labels: List[Tensor], n=30):
     """Display the n samples with the lowest BMA confidence."""
+    confidences = [conf for conf, _, _ in confidences_margins_misclassifications]
     # Find the indices of the n lowest confidence values
     lowest_confidence_indices = np.argsort(confidences)[:n]
     lowest_confidences = np.array(confidences)[lowest_confidence_indices]
@@ -77,16 +91,17 @@ def main(dataset_name: str, models_count: int, averaging_type: str):
             model_weights = [1.0 / models_count] * models_count
         else:
             raise ValueError("Averaging type must be 'BMA' or 'MEAN'.")
-    # Compute and save Bayesian Model Averaging confidences
-    bma_confidences = compute_bma_confidences(models, loader, model_weights)
-    u.save_data(bma_confidences, f"{CONFIDENCES_SAVE_DIR}{dataset_name}_bma_confidences.pkl")
+    # Compute and save Bayesian Model Averaging confidences, margins, and misclassifications
+    hardness_indicators = compute_hardness_indicators(models, loader, model_weights)
+    u.save_data(hardness_indicators, f"{CONFIDENCES_SAVE_DIR}{dataset_name}_bma_hardness_indicators.pkl")
     # Show the samples with the lowest BMA confidence
     labels = [label for _, label in dataset]
-    show_lowest_confidence_samples(dataset, bma_confidences, labels, n=30)
+    show_lowest_confidence_samples(dataset, hardness_indicators, labels, n=30)
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Load models and compute Bayesian Model Averaging confidences.')
+    parser = argparse.ArgumentParser(
+        description='Load models and compute Bayesian Model Averaging confidences, margins, and misclassifications.')
     parser.add_argument('--dataset_name', type=str, default='MNIST')
     parser.add_argument('--models_count', type=int, default=20, help='Number of models in the ensemble.')
     parser.add_argument('--averaging_type', type=str, default='MEAN', choices=['BMA', 'MEAN'],
