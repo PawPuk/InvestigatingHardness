@@ -5,7 +5,8 @@ from typing import List
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from torch.utils.data import DataLoader
+from torch import Tensor
+from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
 from neural_networks import LeNet
@@ -41,7 +42,7 @@ def compute_bma_confidences(models: List[torch.nn.Module], loader: DataLoader, w
     return results
 
 
-def show_lowest_confidence_samples(dataset, confidences, labels, n=30):
+def show_lowest_confidence_samples(dataset: TensorDataset, confidences: List[float], labels: List[Tensor], n=30):
     """Display the n samples with the lowest BMA confidence."""
     # Find the indices of the n lowest confidence values
     lowest_confidence_indices = np.argsort(confidences)[:n]
@@ -58,15 +59,15 @@ def show_lowest_confidence_samples(dataset, confidences, labels, n=30):
     plt.show()
 
 
-def main(dataset_name, models_count, averaging_type):
+def main(dataset_name: str, models_count: int, averaging_type: str):
     dataset = u.load_data_and_normalize(dataset_name)
     loader = DataLoader(dataset, batch_size=128, shuffle=False)
     models = []
     model_weights = []
     # Load only the specified number of models
-    for _ in range(models_count):
+    for i in range(models_count):
         model = LeNet().to(DEVICE)
-        model.load_state_dict(torch.load(f"{MODEL_SAVE_DIR}{dataset_name}_{models_count}_ensemble.pth"))
+        model.load_state_dict(torch.load(f"{MODEL_SAVE_DIR}{dataset_name}_{models_count}_ensemble_{i}.pth"))
         models.append(model)
         # Determine weights based on averaging type
         if averaging_type == 'MEAN':

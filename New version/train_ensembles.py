@@ -20,7 +20,7 @@ MODEL_SAVE_DIR = "models/"
 os.makedirs(MODEL_SAVE_DIR, exist_ok=True)
 
 
-def main(dataset_name, models_count):
+def main(dataset_name: str, models_count: int):
     dataset = u.load_data_and_normalize(dataset_name)
     loader = DataLoader(dataset, batch_size=128, shuffle=False)
     models = []
@@ -29,7 +29,7 @@ def main(dataset_name, models_count):
         optimizer = Adam(model.parameters(), lr=0.01, betas=(0.9, 0.999), weight_decay=1e-4)
         u.train(dataset_name, model, loader, optimizer)
         models.append(model)
-        torch.save(model.state_dict(), f"{MODEL_SAVE_DIR}{dataset_name}_{models_count}_ensemble.pth")
+        torch.save(model.state_dict(), f"{MODEL_SAVE_DIR}{dataset_name}_{models_count}_ensemble_{i}.pth")
         accuracy = u.test(model, loader)
         print(f'Model {i} finished training achieving accuracy of {accuracy} on training set.')
 
