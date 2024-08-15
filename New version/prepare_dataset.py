@@ -5,6 +5,7 @@ from torch.utils.data import Subset, TensorDataset
 import numpy as np
 
 import utils as u
+from imbalance_measures import ImbalanceMeasures
 
 
 def identify_hard_and_easy_data(dataset: TensorDataset, hardness_indicators: List[Tuple[float, float, bool]],
@@ -41,11 +42,15 @@ def identify_hard_and_easy_data(dataset: TensorDataset, hardness_indicators: Lis
     return easy_dataset, hard_dataset
 
 
-def main(dataset_name: str, threshold: float):
+def main(dataset_name: str, threshold: float, oversampling_factor: float, undersampling_ratio: float, smote: bool):
     dataset = u.load_data_and_normalize(dataset_name)
     hardness_indicators = u.load_data(f"{u.CONFIDENCES_SAVE_DIR}{dataset_name}_bma_hardness_indicators.pkl")
     # Identify hard and easy samples
     easy_dataset, hard_dataset = identify_hard_and_easy_data(dataset, hardness_indicators, threshold)
+    # Mitigate the effect of hardness-based within-class data imbalance
+    IM = ImbalanceMeasures(easy_dataset, hard_dataset)
+    hard_dataset = IM.random_oversampling(oversampling_factor)
+    easy_dataset = IM.random_undersampling(undersampling_ratio)
     # Combine and split data into train and test sets, and get the corresponding TensorDatasets
     train_loaders, test_loaders = u.combine_and_split_data(hard_dataset, easy_dataset, dataset_name)
     # Save the DataLoaders
