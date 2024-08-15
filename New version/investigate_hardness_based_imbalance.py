@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader
 from prettytable import PrettyTable
 
 import utils as u
+from prepare_dataset import DatasetPreparer
 from train_ensembles import EnsembleTrainer
 
 
@@ -36,10 +37,11 @@ def train_and_evaluate_ensemble(train_loader: DataLoader, test_loaders: List[Dat
     return results
 
 
-def main(dataset_name: str, models_count: int):
-    # Load the saved DataLoaders
-    train_loaders = u.load_data(f"{u.DATA_SAVE_DIR}{dataset_name}_train_loaders.pkl")
-    test_loaders = u.load_data(f"{u.DATA_SAVE_DIR}{dataset_name}_test_loaders.pkl")
+def main(dataset_name: str, models_count: int, threshold: float, oversampling_factor: float, undersampling_ratio: float,
+         smote: bool):
+    # Generate custom training and test splits and apply measures against hardness-based data imbalance.
+    DP = DatasetPreparer(dataset_name, threshold, oversampling_factor, undersampling_ratio)
+    train_loaders, test_loaders = DP.load_and_prepare_data()
     # Train and evaluate on all training sets
     results = {
         'Hard': train_and_evaluate_ensemble(train_loaders[0], test_loaders, dataset_name, models_count),
@@ -64,5 +66,12 @@ if __name__ == '__main__':
     parser.add_argument('--dataset_name', type=str, default='MNIST',
                         help='Name of the dataset to be used (e.g., MNIST, CIFAR10).')
     parser.add_argument('--models_count', type=int, default=20, help='Number of models in the ensemble.')
+    parser.add_argument('--threshold', type=float, default=0.9,
+                        help='Confidence and margin threshold to split easy and hard samples.')
+    parser.add_argument('--oversampling_factor', type=float, default=1.0,
+                        help='Factor that will be used for oversampling hard samples using random duplication.')
+    parser.add_argument('--undersampling_ratio', type=float, default=0.0,
+                        help='Ratio that will be used for undersampling easy samples using random removal.')
+    parser.add_argument('--smote', type=bool, default=False)  # TODO: finish
     args = parser.parse_args()
     main(**vars(args))
