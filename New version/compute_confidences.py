@@ -1,5 +1,4 @@
 import argparse
-import os
 from typing import List, Tuple
 
 import matplotlib.pyplot as plt
@@ -12,14 +11,10 @@ from tqdm import tqdm
 from neural_networks import LeNet
 import utils as u
 
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 np.random.seed(42)
 torch.manual_seed(42)
 if torch.cuda.is_available():
     torch.cuda.manual_seed_all(42)
-MODEL_SAVE_DIR = "models/"
-CONFIDENCES_SAVE_DIR = "confidences/"
-os.makedirs(CONFIDENCES_SAVE_DIR, exist_ok=True)
 
 
 def compute_hardness_indicators(models: List[torch.nn.Module], loader: DataLoader,
@@ -28,7 +23,7 @@ def compute_hardness_indicators(models: List[torch.nn.Module], loader: DataLoade
     results = []
     with torch.no_grad():
         for data, targets in tqdm(loader, desc='Computing BMA confidences, margins, and misclassifications'):
-            data, targets = data.to(DEVICE), targets.to(DEVICE)
+            data, targets = data.to(u.DEVICE), targets.to(u.DEVICE)
             weighted_confidences = []
             weighted_margins = []
             all_predictions = []
@@ -80,8 +75,8 @@ def main(dataset_name: str, models_count: int, averaging_type: str):
     model_weights = []
     # Load only the specified number of models
     for i in range(models_count):
-        model = LeNet().to(DEVICE)
-        model.load_state_dict(torch.load(f"{MODEL_SAVE_DIR}{dataset_name}_{models_count}_ensemble_{i}.pth"))
+        model = LeNet().to(u.DEVICE)
+        model.load_state_dict(torch.load(f"{u.MODEL_SAVE_DIR}{dataset_name}_{models_count}_ensemble_{i}.pth"))
         models.append(model)
         # Determine weights based on averaging type
         if averaging_type == 'MEAN':
@@ -93,7 +88,7 @@ def main(dataset_name: str, models_count: int, averaging_type: str):
             raise ValueError("Averaging type must be 'BMA' or 'MEAN'.")
     # Compute and save Bayesian Model Averaging confidences, margins, and misclassifications
     hardness_indicators = compute_hardness_indicators(models, loader, model_weights)
-    u.save_data(hardness_indicators, f"{CONFIDENCES_SAVE_DIR}{dataset_name}_bma_hardness_indicators.pkl")
+    u.save_data(hardness_indicators, f"{u.CONFIDENCES_SAVE_DIR}{dataset_name}_bma_hardness_indicators.pkl")
     # Show the samples with the lowest BMA confidence
     labels = [label for _, label in dataset]
     show_lowest_confidence_samples(dataset, hardness_indicators, labels, n=30)

@@ -12,13 +12,10 @@ from neural_networks import LeNet
 import utils as u
 
 
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 np.random.seed(42)
 torch.manual_seed(42)
 if torch.cuda.is_available():
     torch.cuda.manual_seed_all(42)
-MODEL_SAVE_DIR = "models/"
-os.makedirs(MODEL_SAVE_DIR, exist_ok=True)
 
 
 class EnsembleTrainer:
@@ -31,7 +28,7 @@ class EnsembleTrainer:
     def train_ensemble(self, train_loader: DataLoader, test_loader: Union[DataLoader, None] = None):
         """Train an ensemble of models on the full dataset."""
         for i in tqdm(range(self.models_count)):
-            model = LeNet().to(DEVICE)
+            model = LeNet().to(u.DEVICE)
             optimizer = Adam(model.parameters(), lr=0.01, betas=(0.9, 0.999), weight_decay=1e-4)
             # Train the model
             u.train(self.dataset_name, model, train_loader, optimizer)
@@ -39,7 +36,7 @@ class EnsembleTrainer:
             # Save model state
             if self.save:
                 torch.save(model.state_dict(),
-                           f"{MODEL_SAVE_DIR}{self.dataset_name}_{self.models_count}_ensemble_{i}.pth")
+                           f"{u.MODEL_SAVE_DIR}{self.dataset_name}_{self.models_count}_ensemble_{i}.pth")
             # Evaluate on the training set
             if test_loader is not None:
                 accuracy = u.test(model, test_loader)

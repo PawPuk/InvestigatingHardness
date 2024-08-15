@@ -1,5 +1,6 @@
-from typing import List, Tuple, Union
+import os
 import pickle
+from typing import List, Tuple, Union
 
 import numpy as np
 import torch
@@ -13,6 +14,11 @@ EPSILON = 0.000000001  # cutoff for the computation of the variance in the stand
 EPOCHS = 10
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 CRITERION = torch.nn.CrossEntropyLoss()
+CONFIDENCES_SAVE_DIR = "confidences/"
+DATA_SAVE_DIR = "data/"
+MODEL_SAVE_DIR = "models/"
+for directory in [CONFIDENCES_SAVE_DIR, DATA_SAVE_DIR, MODEL_SAVE_DIR]:
+    os.makedirs(directory, exist_ok=True)
 
 
 def save_data(data, file_name: str):
@@ -124,13 +130,12 @@ def combine_and_split_data(hard_dataset: Subset, easy_dataset: Subset,
     Generates four training sets:
     1. Full training set (hard + easy).
     2. Hard-only training set.
-    3. Full easy-only training set.
-    4. Subset of easy-only training set (same size as hard-only set).
+    3. Easy-only training set.
 
     :param hard_dataset: identified hard samples (Subset)
     :param easy_dataset: identified easy samples (Subset)
     :param dataset_name: name of the used dataset
-    :return: A list containing 4 training DataLoaders (for hard, full easy, easy subset, all data), and test loaders.
+    :return: A list containing 3 training DataLoaders (for hard, easy, all data), and test loaders.
     """
     train_test_ratio = 6 / 7 if dataset_name == 'MNIST' else 5 / 6 if dataset_name == 'CIFAR10' else 8 / 10
 
@@ -153,11 +158,6 @@ def combine_and_split_data(hard_dataset: Subset, easy_dataset: Subset,
     easy_train_data, easy_test_data = easy_data[:train_size_easy], easy_data[train_size_easy:]
     easy_train_target, easy_test_target = easy_target[:train_size_easy], easy_target[train_size_easy:]
 
-    # Downsample easy training data to match the size of hard training data for the easy subset
-    easy_indices = torch.randperm(len(easy_train_data))[:len(hard_train_data)]
-    easy_subset_data = easy_train_data[easy_indices]
-    easy_subset_target = easy_train_target[easy_indices]
-
     # Combine easy and hard samples into full training and test data
     train_data = torch.cat((hard_train_data, easy_train_data), dim=0)
     train_targets = torch.cat((hard_train_target, easy_train_target), dim=0)
@@ -171,8 +171,7 @@ def combine_and_split_data(hard_dataset: Subset, easy_dataset: Subset,
     # Create DataLoaders for full, hard-only, full easy, and easy subset training sets
     train_loaders = [
         DataLoader(TensorDataset(hard_train_data, hard_train_target), batch_size=128, shuffle=True),  # Hard-only
-        DataLoader(TensorDataset(easy_train_data, easy_train_target), batch_size=128, shuffle=True),  # Full easy-only
-        DataLoader(TensorDataset(easy_subset_data, easy_subset_target), batch_size=128, shuffle=True),  # Easy subset
+        DataLoader(TensorDataset(easy_train_data, easy_train_target), batch_size=128, shuffle=True),  # Easy-only
         DataLoader(TensorDataset(train_data, train_targets), batch_size=128, shuffle=True),  # Full training set
     ]
 

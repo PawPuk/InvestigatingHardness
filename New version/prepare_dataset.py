@@ -1,15 +1,10 @@
 import argparse
 from typing import List, Tuple
 
-import torch
 from torch.utils.data import Subset, TensorDataset
 import numpy as np
 
 import utils as u
-
-CONFIDENCES_SAVE_DIR = "confidences/"
-DATA_SAVE_DIR = "data/"
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def identify_hard_and_easy_data(dataset: TensorDataset, hardness_indicators: List[Tuple[float, float, bool]],
@@ -48,14 +43,14 @@ def identify_hard_and_easy_data(dataset: TensorDataset, hardness_indicators: Lis
 
 def main(dataset_name: str, threshold: float):
     dataset = u.load_data_and_normalize(dataset_name)
-    hardness_indicators = u.load_data(f"{CONFIDENCES_SAVE_DIR}{dataset_name}_bma_hardness_indicators.pkl")
+    hardness_indicators = u.load_data(f"{u.CONFIDENCES_SAVE_DIR}{dataset_name}_bma_hardness_indicators.pkl")
     # Identify hard and easy samples
     easy_dataset, hard_dataset = identify_hard_and_easy_data(dataset, hardness_indicators, threshold)
     # Combine and split data into train and test sets, and get the corresponding TensorDatasets
     train_loaders, test_loaders = u.combine_and_split_data(hard_dataset, easy_dataset, dataset_name)
     # Save the DataLoaders
-    u.save_data(train_loaders, f"{DATA_SAVE_DIR}{dataset_name}_train_loaders.pkl")
-    u.save_data(test_loaders, f"{DATA_SAVE_DIR}{dataset_name}_test_loaders.pkl")
+    u.save_data(train_loaders, f"{u.DATA_SAVE_DIR}{dataset_name}_train_loaders.pkl")
+    u.save_data(test_loaders, f"{u.DATA_SAVE_DIR}{dataset_name}_test_loaders.pkl")
 
 
 if __name__ == '__main__':
@@ -64,5 +59,10 @@ if __name__ == '__main__':
     parser.add_argument('--dataset_name', type=str, default='MNIST')
     parser.add_argument('--threshold', type=float, default=0.9,
                         help='Confidence and margin threshold to split easy and hard samples.')
+    parser.add_argument('--oversampling_factor', type=float, default=1.0,
+                        help='Factor that will be used for oversampling hard samples using random duplication.')
+    parser.add_argument('--undersampling_ratio', type=float, default=0.0,
+                        help='Ratio that will be used for undersampling easy samples using random removal.')
+    parser.add_argument('--smote', type=bool, default=False)  # TODO: finish
     args = parser.parse_args()
     main(**vars(args))

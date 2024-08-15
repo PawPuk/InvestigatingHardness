@@ -1,16 +1,11 @@
 import argparse
 from typing import Dict, List, Tuple
 
-import torch
 from torch.utils.data import DataLoader
 from prettytable import PrettyTable
 
 import utils as u
 from train_ensembles import EnsembleTrainer
-
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-CONFIDENCES_SAVE_DIR = "confidences/"
-DATA_SAVE_DIR = "data/"
 
 
 def train_and_evaluate_ensemble(train_loader: DataLoader, test_loaders: List[DataLoader], dataset_name: str,
@@ -43,20 +38,19 @@ def train_and_evaluate_ensemble(train_loader: DataLoader, test_loaders: List[Dat
 
 def main(dataset_name: str, models_count: int):
     # Load the saved DataLoaders
-    train_loaders = u.load_data(f"{DATA_SAVE_DIR}{dataset_name}_train_loaders.pkl")
-    test_loaders = u.load_data(f"{DATA_SAVE_DIR}{dataset_name}_test_loaders.pkl")
+    train_loaders = u.load_data(f"{u.DATA_SAVE_DIR}{dataset_name}_train_loaders.pkl")
+    test_loaders = u.load_data(f"{u.DATA_SAVE_DIR}{dataset_name}_test_loaders.pkl")
     # Train and evaluate on all training sets
     results = {
         'Hard': train_and_evaluate_ensemble(train_loaders[0], test_loaders, dataset_name, models_count),
-        'Easy (Full)': train_and_evaluate_ensemble(train_loaders[1], test_loaders, dataset_name, models_count),
-        'Easy (Subset)': train_and_evaluate_ensemble(train_loaders[2], test_loaders, dataset_name, models_count),
-        'All': train_and_evaluate_ensemble(train_loaders[3], test_loaders, dataset_name, models_count)
+        'Easy': train_and_evaluate_ensemble(train_loaders[1], test_loaders, dataset_name, models_count),
+        'All': train_and_evaluate_ensemble(train_loaders[2], test_loaders, dataset_name, models_count)
     }
-    # Create a 4x3 table with Training sets as rows and Test sets as columns
+    # Create a 3x3 table with Training sets as rows and Test sets as columns
     table = PrettyTable()
     table.field_names = ["Training Set / Test Set", "Hard", "Easy", "All"]
     # Populate the table with the results
-    for train_set_name in ['Hard', 'Easy (Full)', 'Easy (Subset)', 'All']:
+    for train_set_name in ['Hard', 'Easy', 'All']:
         row = [train_set_name]
         for test_set_name in ['hard', 'easy', 'all']:
             mean_accuracy, std_accuracy = results[train_set_name][test_set_name]
