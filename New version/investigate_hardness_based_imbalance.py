@@ -1,10 +1,8 @@
 import argparse
-from typing import Dict, Tuple
+from typing import Dict, List, Tuple
 
-import numpy as np
 import torch
 from torch.utils.data import DataLoader
-from typing import List
 from prettytable import PrettyTable
 
 import utils as u
@@ -49,16 +47,18 @@ def main(dataset_name: str, models_count: int):
     test_loaders = u.load_data(f"{DATA_SAVE_DIR}{dataset_name}_test_loaders.pkl")
     # Train and evaluate on all training sets
     results = {
-        'Train on Hard': train_and_evaluate_ensemble(train_loaders[0], test_loaders, dataset_name, models_count),
-        'Train on Easy': train_and_evaluate_ensemble(train_loaders[1], test_loaders, dataset_name, models_count),
-        'Train on All': train_and_evaluate_ensemble(train_loaders[2], test_loaders, dataset_name, models_count)
+        'Hard': train_and_evaluate_ensemble(train_loaders[0], test_loaders, dataset_name, models_count),
+        'Easy (Full)': train_and_evaluate_ensemble(train_loaders[1], test_loaders, dataset_name, models_count),
+        'Easy (Subset)': train_and_evaluate_ensemble(train_loaders[2], test_loaders, dataset_name, models_count),
+        'All': train_and_evaluate_ensemble(train_loaders[3], test_loaders, dataset_name, models_count)
     }
-    # Create a 3x3 table with Test sets as rows and Train sets as columns
+    # Create a 4x3 table with Training sets as rows and Test sets as columns
     table = PrettyTable()
-    table.field_names = ["Training Set / Test Set", "hard", "easy", "all"]
-    for test_set_name in ['hard', 'easy', 'all']:
-        row = [test_set_name.capitalize()]
-        for train_set_name in ['Train on Hard', 'Train on Easy', 'Train on All']:
+    table.field_names = ["Training Set / Test Set", "Hard", "Easy", "All"]
+    # Populate the table with the results
+    for train_set_name in ['Hard', 'Easy (Full)', 'Easy (Subset)', 'All']:
+        row = [train_set_name]
+        for test_set_name in ['hard', 'easy', 'all']:
             mean_accuracy, std_accuracy = results[train_set_name][test_set_name]
             row.append(f"{mean_accuracy:.2f} ± {std_accuracy:.2f}")
         table.add_row(row)
