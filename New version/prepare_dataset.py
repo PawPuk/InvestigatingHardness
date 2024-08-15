@@ -49,16 +49,13 @@ def identify_hard_and_easy_data(dataset: TensorDataset, hardness_indicators: Lis
 def main(dataset_name: str, threshold: float):
     dataset = u.load_data_and_normalize(dataset_name)
     hardness_indicators = u.load_data(f"{CONFIDENCES_SAVE_DIR}{dataset_name}_bma_hardness_indicators.pkl")
-    # Split the dataset into easy and hard samples
+    # Identify hard and easy samples
     easy_dataset, hard_dataset = identify_hard_and_easy_data(dataset, hardness_indicators, threshold)
     # Combine and split data into train and test sets, and get the corresponding TensorDatasets
-    train_loader, test_loaders, train_dataset, test_dataset = u.combine_and_split_data(hard_dataset, easy_dataset,
-                                                                                       dataset_name)
-    # Save the DataLoaders and TensorDatasets
-    u.save_data(train_loader, f"{DATA_SAVE_DIR}{dataset_name}_train_loader.pkl")
+    train_loaders, test_loaders = u.combine_and_split_data(hard_dataset, easy_dataset, dataset_name)
+    # Save the DataLoaders
+    u.save_data(train_loaders, f"{DATA_SAVE_DIR}{dataset_name}_train_loaders.pkl")
     u.save_data(test_loaders, f"{DATA_SAVE_DIR}{dataset_name}_test_loaders.pkl")
-    u.save_data(train_dataset, f"{DATA_SAVE_DIR}{dataset_name}_train_dataset.pkl")
-    u.save_data(test_dataset, f"{DATA_SAVE_DIR}{dataset_name}_test_dataset.pkl")
 
 
 if __name__ == '__main__':

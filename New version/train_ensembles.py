@@ -1,7 +1,7 @@
-from typing import List, Tuple, Union
-
 import argparse
 import os
+from typing import Union
+
 import numpy as np
 import torch
 from torch.optim import Adam
@@ -22,34 +22,28 @@ os.makedirs(MODEL_SAVE_DIR, exist_ok=True)
 
 
 class EnsembleTrainer:
-    def __init__(self, dataset_name: str, loaders: Union[Tuple[DataLoader, DataLoader], None],
-                 models_count: int = 20, save: bool = False):
+    def __init__(self, dataset_name: str, models_count: int = 20, save: bool = False):
         self.dataset_name = dataset_name
-        if loaders is None:
-            dataset = u.load_data_and_normalize(dataset_name)
-            self.train_loader = DataLoader(dataset, batch_size=128, shuffle=False)
-            self.test_loader = self.train_loader
-        else:
-            self.train_loader, self.test_loader = loaders
         self.models_count = models_count
         self.save = save
         self.models = []
 
-    def train_ensemble(self):
+    def train_ensemble(self, train_loader: DataLoader, test_loader: Union[DataLoader, None] = None):
         """Train an ensemble of models on the full dataset."""
         for i in tqdm(range(self.models_count)):
             model = LeNet().to(DEVICE)
             optimizer = Adam(model.parameters(), lr=0.01, betas=(0.9, 0.999), weight_decay=1e-4)
             # Train the model
-            u.train(self.dataset_name, model, self.train_loader, optimizer)
+            u.train(self.dataset_name, model, train_loader, optimizer)
             self.models.append(model)
             # Save model state
             if self.save:
                 torch.save(model.state_dict(),
                            f"{MODEL_SAVE_DIR}{self.dataset_name}_{self.models_count}_ensemble_{i}.pth")
             # Evaluate on the training set
-            accuracy = u.test(model, self.test_loader)
-            print(f'Model {i} finished training, achieving accuracy of {accuracy}% on the training set.')
+            if test_loader is not None:
+                accuracy = u.test(model, test_loader)
+                print(f'Model {i} finished training, achieving accuracy of {accuracy}% on the training set.')
 
     def get_trained_models(self):
         """Return the list of trained models."""
@@ -57,8 +51,10 @@ class EnsembleTrainer:
 
 
 def main(dataset_name: str, models_count: int):
-    trainer = EnsembleTrainer(dataset_name, None, models_count, save=True)
-    trainer.train_ensemble()
+    trainer = EnsembleTrainer(dataset_name, models_count, True)
+    dataset = u.load_data_and_normalize(dataset_name)
+    loader = DataLoader(dataset, batch_size=128, shuffle=False)
+    trainer.train_ensemble(loader, loader)
 
 
 if __name__ == '__main__':

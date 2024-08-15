@@ -25,6 +25,10 @@ def load_data(filename: str):
         return pickle.load(f)
 
 
+def calculate_mean_std(accuracies: List[float]) -> Tuple[float, float]:
+    return np.mean(accuracies), np.std(accuracies)
+
+
 def load_data_and_normalize(dataset_name: str) -> TensorDataset:
     """ Used to load the data from common datasets available in torchvision, and normalize them. The normalization
     is based on the mean and std of a random subset of the dataset of the size subset_size.
@@ -112,7 +116,7 @@ def dataset_to_tensors(dataset: Dataset) -> Tuple[torch.Tensor, torch.Tensor]:
 
 
 def combine_and_split_data(hard_dataset: Subset, easy_dataset: Subset,
-                           dataset_name: str) -> Tuple[DataLoader, List[DataLoader], TensorDataset, TensorDataset]:
+                           dataset_name: str) -> Tuple[List[DataLoader], List[DataLoader]]:
     """
     Combines easy and hard data samples into a single dataset, then splits it into train and test sets while
     maintaining the same easy:hard ratio in both splits and keeping the overall train:test ratio as defined.
@@ -120,38 +124,51 @@ def combine_and_split_data(hard_dataset: Subset, easy_dataset: Subset,
     :param hard_dataset: identified hard samples (Subset)
     :param easy_dataset: identified easy samples (Subset)
     :param dataset_name: name of the used dataset
-    :return: train loader, test loaders (for hard, easy, all data), and TensorDatasets for train and test sets
+    :return: A list containing 3 training DataLoaders (for hard, easy, all data), and test loaders.
     """
     train_test_ratio = 6 / 7 if dataset_name == 'MNIST' else 5 / 6 if dataset_name == 'CIFAR10' else 8 / 10
+
     # Convert Subsets into Tensors
     hard_data, hard_target = dataset_to_tensors(hard_dataset)
     easy_data, easy_target = dataset_to_tensors(easy_dataset)
+
     # Randomly shuffle hard and easy samples
     hard_perm, easy_perm = torch.randperm(hard_data.size(0)), torch.randperm(easy_data.size(0))
     hard_data, hard_target = hard_data[hard_perm], hard_target[hard_perm]
     easy_data, easy_target = easy_data[easy_perm], easy_target[easy_perm]
+
     # Calculate the number of training and test samples
     train_size_hard = int(len(hard_data) * train_test_ratio)
     train_size_easy = int(len(easy_data) * train_test_ratio)
+
     # Split hard and easy samples into training and test sets
     hard_train_data, hard_test_data = hard_data[:train_size_hard], hard_data[train_size_hard:]
     hard_train_target, hard_test_target = hard_target[:train_size_hard], hard_target[train_size_hard:]
     easy_train_data, easy_test_data = easy_data[:train_size_easy], easy_data[train_size_easy:]
     easy_train_target, easy_test_target = easy_target[:train_size_easy], easy_target[train_size_easy:]
-    # Combine easy and hard samples into training and test data
+
+    # Combine easy and hard samples into full training and test data
     train_data = torch.cat((hard_train_data, easy_train_data), dim=0)
     train_targets = torch.cat((hard_train_target, easy_train_target), dim=0)
     test_data = torch.cat((hard_test_data, easy_test_data), dim=0)
     test_targets = torch.cat((hard_test_target, easy_test_target), dim=0)
-    # Shuffle the final training split
+
+    # Shuffle the full training split
     train_permutation = torch.randperm(train_data.size(0))
     train_data, train_targets = train_data[train_permutation], train_targets[train_permutation]
-    # Create DataLoaders
-    train_loader = DataLoader(TensorDataset(train_data, train_targets), batch_size=128, shuffle=True)
-    test_loaders = []
-    for d, t in [(hard_test_data, hard_test_target), (easy_test_data, easy_test_target), (test_data, test_targets)]:
-        test_loaders.append(DataLoader(TensorDataset(d, t), batch_size=len(d)))
-    # Return DataLoaders and TensorDatasets
-    train_dataset = TensorDataset(train_data, train_targets)
-    test_dataset = TensorDataset(test_data, test_targets)
-    return train_loader, test_loaders, train_dataset, test_dataset
+
+    # Create DataLoaders for full, hard-only, and easy-only training sets
+    train_loaders = [
+        DataLoader(TensorDataset(hard_train_data, hard_train_target), batch_size=128, shuffle=True),  # Hard-only
+        DataLoader(TensorDataset(easy_train_data, easy_train_target), batch_size=128, shuffle=True),  # Easy-only
+        DataLoader(TensorDataset(train_data, train_targets), batch_size=128, shuffle=True),  # Full training set
+    ]
+
+    # Create DataLoaders for the test sets (hard, easy, all)
+    test_loaders = [
+        DataLoader(TensorDataset(hard_test_data, hard_test_target), batch_size=len(hard_test_data)),  # Hard test set
+        DataLoader(TensorDataset(easy_test_data, easy_test_target), batch_size=len(easy_test_data)),  # Easy test set
+        DataLoader(TensorDataset(test_data, test_targets), batch_size=len(test_data))  # Full test set
+    ]
+
+    return train_loaders, test_loaders
