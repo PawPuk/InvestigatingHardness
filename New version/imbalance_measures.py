@@ -17,16 +17,20 @@ class ImbalanceMeasures:
         self.hard_data = hard_dataset
 
     def random_oversampling(self, multiplication_factor) -> Subset:
+        easy_size = len(self.easy_data)
         hard_size = len(self.hard_data)
+        new_size = hard_size + int((easy_size - hard_size) * multiplication_factor)
         # Randomly oversample hard data until it matches the size of easy data
-        indices = np.random.choice(len(self.hard_data), size=int(multiplication_factor * hard_size), replace=True)
+        indices = np.random.choice(len(self.hard_data), size=new_size, replace=True)
         # Return a new Subset
         return Subset(self.hard_data.dataset, indices)
 
     def random_undersampling(self, removal_ratio):
         easy_size = len(self.easy_data)
+        hard_size = len(self.hard_data)
+        new_size = hard_size + int((easy_size - hard_size) * removal_ratio)
         # Randomly undersample easy data to match the size of hard data
-        indices = np.random.choice(len(self.easy_data), size=int(removal_ratio * easy_size), replace=False)
+        indices = np.random.choice(len(self.easy_data), size=new_size, replace=False)
         # Return a new Subset
         return Subset(self.easy_data.dataset, indices)
 

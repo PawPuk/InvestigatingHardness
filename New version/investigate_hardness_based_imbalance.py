@@ -68,10 +68,16 @@ if __name__ == '__main__':
     parser.add_argument('--models_count', type=int, default=20, help='Number of models in the ensemble.')
     parser.add_argument('--threshold', type=float, default=0.9,
                         help='Confidence and margin threshold to split easy and hard samples.')
-    parser.add_argument('--oversampling_factor', type=float, default=1.0,
-                        help='Factor that will be used for oversampling hard samples using random duplication.')
-    parser.add_argument('--undersampling_ratio', type=float, default=0.0,
-                        help='Ratio that will be used for undersampling easy samples using random removal.')
+    parser.add_argument('--oversampling_factor', type=float, default=0.0,
+                        help='Factor for oversampling hard samples using random duplication. '
+                             '0.0 keeps the size of hard samples the same as the hard dataset size, '
+                             '1.0 increases the hard dataset size to match the easy dataset size. '
+                             'Values in between allow partial oversampling.')
+    parser.add_argument('--undersampling_ratio', type=float, default=1.0,
+                        help='Ratio for undersampling easy samples using random removal. '
+                             '0.0 reduces the size of easy samples to match the hard dataset size, '
+                             '1.0 keeps the size of easy samples the same as the easy dataset size. '
+                             'Values in between allow partial undersampling.')
     parser.add_argument('--smote', type=bool, default=False)  # TODO: finish
     args = parser.parse_args()
     main(**vars(args))
