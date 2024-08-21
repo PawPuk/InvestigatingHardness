@@ -17,7 +17,8 @@ CRITERION = torch.nn.CrossEntropyLoss()
 CONFIDENCES_SAVE_DIR = "confidences/"
 DATA_SAVE_DIR = "data/"
 MODEL_SAVE_DIR = "models/"
-for directory in [CONFIDENCES_SAVE_DIR, DATA_SAVE_DIR, MODEL_SAVE_DIR]:
+ACCURACIES_SAVE_DIR = "accuracies/"
+for directory in [CONFIDENCES_SAVE_DIR, DATA_SAVE_DIR, MODEL_SAVE_DIR, ACCURACIES_SAVE_DIR]:
     os.makedirs(directory, exist_ok=True)
 
 

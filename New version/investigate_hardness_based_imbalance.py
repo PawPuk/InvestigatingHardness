@@ -48,6 +48,7 @@ def main(dataset_name: str, models_count: int, threshold: float, oversampling_fa
         'Easy': train_and_evaluate_ensemble(train_loaders[1], test_loaders, dataset_name, models_count),
         'All': train_and_evaluate_ensemble(train_loaders[2], test_loaders, dataset_name, models_count)
     }
+    u.save_data(results, f"{u.ACCURACIES_SAVE_DIR}{dataset_name}_osf_{oversampling_factor}_usr_{undersampling_ratio}.pkl")
     # Create a 3x3 table with Training sets as rows and Test sets as columns
     table = PrettyTable()
     table.field_names = ["Training Set / Test Set", "Hard", "Easy", "All"]

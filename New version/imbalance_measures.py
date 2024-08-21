@@ -16,7 +16,7 @@ class ImbalanceMeasures:
         self.easy_data = easy_dataset
         self.hard_data = hard_dataset
 
-    def random_oversampling(self, multiplication_factor) -> Subset:
+    def random_oversampling(self, multiplication_factor: float) -> Subset:
         easy_size = len(self.easy_data)
         hard_size = len(self.hard_data)
         new_size = hard_size + int((easy_size - hard_size) * multiplication_factor)
@@ -25,7 +25,7 @@ class ImbalanceMeasures:
         # Return a new Subset
         return Subset(self.hard_data.dataset, indices)
 
-    def random_undersampling(self, removal_ratio):
+    def random_undersampling(self, removal_ratio: float):
         easy_size = len(self.easy_data)
         hard_size = len(self.hard_data)
         new_size = hard_size + int((easy_size - hard_size) * removal_ratio)
