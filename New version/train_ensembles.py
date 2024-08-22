@@ -28,7 +28,7 @@ class EnsembleTrainer:
         """Train an ensemble of models on the full dataset."""
         for i in tqdm(range(self.models_count)):
             model = LeNet().to(u.DEVICE)
-            optimizer = Adam(model.parameters(), lr=0.01, betas=(0.9, 0.999), weight_decay=1e-4)
+            optimizer = Adam(model.parameters(), lr=0.001)
             # Train the model
             u.train(self.dataset_name, model, train_loader, optimizer)
             self.models.append(model)
@@ -49,7 +49,7 @@ class EnsembleTrainer:
 def main(dataset_name: str, models_count: int):
     trainer = EnsembleTrainer(dataset_name, models_count, True)
     dataset = u.load_data_and_normalize(dataset_name)
-    loader = DataLoader(dataset, batch_size=128, shuffle=False)
+    loader = DataLoader(dataset, batch_size=32, shuffle=False)
     trainer.train_ensemble(loader, loader)
 
 

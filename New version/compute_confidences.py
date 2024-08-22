@@ -70,7 +70,7 @@ def show_lowest_confidence_samples(dataset: TensorDataset,
 
 def main(dataset_name: str, models_count: int, averaging_type: str):
     dataset = u.load_data_and_normalize(dataset_name)
-    loader = DataLoader(dataset, batch_size=128, shuffle=False)
+    loader = DataLoader(dataset, batch_size=32, shuffle=False)
     models = []
     model_weights = []
     # Load only the specified number of models

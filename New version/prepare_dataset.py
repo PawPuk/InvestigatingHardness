@@ -23,9 +23,13 @@ class DatasetPreparer:
         # Split into easy and hard datasets
         easy_dataset, hard_dataset = self.identify_hard_and_easy_data(dataset, hardness_indicators)
         # Mitigate imbalance if required
+        old_easy_size, old_hard_size = len(easy_dataset), len(hard_dataset)
         IM = ImbalanceMeasures(easy_dataset, hard_dataset)
         hard_dataset = IM.random_oversampling(self.oversampling_factor)
         easy_dataset = IM.random_undersampling(self.undersampling_ratio)
+        print(f'Added {len(hard_dataset) - old_hard_size} hard samples via oversampling, and removed '
+              f'{len(easy_dataset) - old_easy_size} easy samples via undersampling. Continuing with {len(easy_dataset)} '
+              f'easy data samples, and {len(hard_dataset)} hard data samples.')
         return u.combine_and_split_data(hard_dataset, easy_dataset, self.dataset_name)
 
     def identify_hard_and_easy_data(self, dataset: TensorDataset,

@@ -24,7 +24,7 @@ def load_results(dataset_name: str, varying_param: str, fixed_value: float):
     return results, varying_values
 
 
-def plot_results(results, varying_values, fixed_param_name, fixed_value):
+def plot_results(results, varying_values, fixed_param_name, varying_param, fixed_value):
     """
     Plot the results with the varying parameter on the x-axis and accuracy on the y-axis.
 
@@ -55,9 +55,9 @@ def plot_results(results, varying_values, fixed_param_name, fixed_value):
             ax.fill_between(varying_values, np.array(means) - np.array(stds), np.array(means) + np.array(stds),
                             color=colors[j], alpha=0.2)
 
-    ax.set_xlabel(f'{fixed_param_name.capitalize()} Values')
+    ax.set_xlabel(f'{varying_param.capitalize()} Values')
     ax.set_ylabel('Accuracy')
-    ax.set_title(f'Accuracy vs {fixed_param_name.capitalize()} (Fixed {fixed_param_name}: {fixed_value})')
+    ax.set_title(f'Accuracy vs {varying_param.capitalize()} (Fixed {fixed_param_name}: {fixed_value})')
     ax.legend()
     plt.grid(True)
     plt.show()
@@ -83,7 +83,7 @@ def main(dataset_name: str, fixed_oversampling_factor: float, fixed_undersamplin
     # Load results
     results, varying_values = load_results(dataset_name, varying_param, fixed_value)
     # Plot results
-    plot_results(results, varying_values, fixed_param_name, fixed_value)
+    plot_results(results, varying_values, fixed_param_name, varying_param, fixed_value)
 
 
 if __name__ == '__main__':

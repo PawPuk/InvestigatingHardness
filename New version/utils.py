@@ -171,9 +171,9 @@ def combine_and_split_data(hard_dataset: Subset, easy_dataset: Subset,
 
     # Create DataLoaders for full, hard-only, full easy, and easy subset training sets
     train_loaders = [
-        DataLoader(TensorDataset(hard_train_data, hard_train_target), batch_size=128, shuffle=True),  # Hard-only
-        DataLoader(TensorDataset(easy_train_data, easy_train_target), batch_size=128, shuffle=True),  # Easy-only
-        DataLoader(TensorDataset(train_data, train_targets), batch_size=128, shuffle=True),  # Full training set
+        DataLoader(TensorDataset(hard_train_data, hard_train_target), batch_size=32, shuffle=True),  # Hard-only
+        DataLoader(TensorDataset(easy_train_data, easy_train_target), batch_size=32, shuffle=True),  # Easy-only
+        DataLoader(TensorDataset(train_data, train_targets), batch_size=32, shuffle=True),  # Full training set
     ]
 
     # Create DataLoaders for the test sets (hard, easy, all)
