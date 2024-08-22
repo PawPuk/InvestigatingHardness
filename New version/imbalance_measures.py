@@ -34,34 +34,64 @@ class ImbalanceMeasures:
         # Return a new Subset
         return Subset(self.easy_data.dataset, indices)
 
-    # TODO: verify correctness of SMOTE!!!
-    def SMOTE(self, k_neighbors=5):
-        # Extract the features (assuming they are tensors) from the hard dataset
+    def SMOTE(self, multiplication_factor: float, k_neighbors: int = 5):
+        """
+        Apply SMOTE to balance the dataset by generating synthetic samples.
+
+        :param multiplication_factor: The oversampling factor
+        :param k_neighbors: The number of nearest neighbors to consider when generating synthetic samples.
+        """
+        # Extract features and labels from the hard dataset.
         hard_loader = DataLoader(self.hard_data, batch_size=len(self.hard_data))
         hard_features, hard_labels = next(iter(hard_loader))
         hard_features, hard_labels = hard_features.to(u.DEVICE), hard_labels.to(u.DEVICE)
 
-        # Fit nearest neighbors model to the hard data
-        nn = NearestNeighbors(n_neighbors=k_neighbors)
-        nn.fit(hard_features.cpu().numpy())
+        easy_size = len(self.easy_data)
+        hard_size = len(self.hard_data)
+        new_size = hard_size + int((easy_size - hard_size) * multiplication_factor)
 
-        # For each point, generate synthetic samples
-        synthetic_samples = []
-        for i in range(len(hard_features)):
-            neighbors = nn.kneighbors(hard_features[i].cpu().unsqueeze(0).numpy(), return_distance=False)
-            neighbor_idx = np.random.choice(neighbors[0][1:])  # Choose one neighbor randomly
-            neighbor = hard_features[neighbor_idx]
+        # Calculate target samples per class
+        num_classes = torch.unique(hard_labels).size(0)
+        target_samples_per_class = new_size // num_classes
 
-            # Interpolate to create a new synthetic sample
-            diff = neighbor - hard_features[i]
-            synthetic_sample = hard_features[i] + torch.rand(1).to(u.DEVICE) * diff
-            synthetic_samples.append(synthetic_sample)
+        # Store synthetic samples and labels
+        all_synthetic_samples = []
+        all_synthetic_labels = []
 
-        synthetic_samples = torch.stack(synthetic_samples)
+        for class_label in torch.unique(hard_labels):
+            # Select samples belonging to the current class
+            class_mask = (hard_labels == class_label)
+            class_features = hard_features[class_mask]
+            class_size = len(class_features)
+            if multiplication_factor > 0.0:
+                nn = NearestNeighbors(n_neighbors=k_neighbors)
+                nn.fit(class_features.cpu().numpy())
+                num_synthetic_samples = target_samples_per_class - class_size
+                synthetic_samples = []
+                # Generate synthetic samples
+                for i in range(num_synthetic_samples):
+                    idx = np.random.randint(0, class_size)
+                    neighbors = nn.kneighbors(class_features[idx].cpu().unsqueeze(0).numpy(), return_distance=False)
+                    neighbor_idx = np.random.choice(neighbors[0][1:])  # Choose one neighbor randomly
+                    neighbor = class_features[neighbor_idx]
+                    # Interpolate between the chosen sample and its neighbor
+                    diff = neighbor - class_features[idx]
+                    synthetic_sample = class_features[idx] + torch.rand(1).to(u.DEVICE) * diff
+                    synthetic_samples.append(synthetic_sample)
+                # Stack synthetic samples and append them to the list
+                synthetic_samples = torch.stack(synthetic_samples)
+                synthetic_labels = torch.full((num_synthetic_samples,), class_label, dtype=torch.long).to(u.DEVICE)
+                all_synthetic_samples.append(synthetic_samples)
+                all_synthetic_labels.append(synthetic_labels)
 
-        # Concatenate original hard data with synthetic data
-        augmented_features = torch.cat((hard_features, synthetic_samples), dim=0)
-        augmented_labels = torch.cat((hard_labels, hard_labels[:len(synthetic_samples)]), dim=0)
+        # Concatenate all synthetic samples and original data
+        if all_synthetic_samples:
+            synthetic_samples = torch.cat(all_synthetic_samples, dim=0)
+            synthetic_labels = torch.cat(all_synthetic_labels, dim=0)
+            augmented_features = torch.cat((hard_features, synthetic_samples), dim=0)
+            augmented_labels = torch.cat((hard_labels, synthetic_labels), dim=0)
+        else:
+            augmented_features = hard_features
+            augmented_labels = hard_labels
 
-        # Convert to TensorDataset and return
         return TensorDataset(augmented_features, augmented_labels)

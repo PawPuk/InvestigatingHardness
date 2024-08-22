@@ -12,8 +12,8 @@ class DatasetPreparer:
                  smote: bool = False):
         self.dataset_name = dataset_name
         self.threshold = threshold
-        self.oversampling_factor = oversampling_factor
-        self.undersampling_ratio = undersampling_ratio
+        self.osf = oversampling_factor
+        self.usr = undersampling_ratio
         self.smote = smote
 
     def load_and_prepare_data(self) -> Tuple[List[DataLoader], List[DataLoader]]:
@@ -25,8 +25,8 @@ class DatasetPreparer:
         # Mitigate imbalance if required
         old_easy_size, old_hard_size = len(easy_dataset), len(hard_dataset)
         IM = ImbalanceMeasures(easy_dataset, hard_dataset)
-        hard_dataset = IM.random_oversampling(self.oversampling_factor)
-        easy_dataset = IM.random_undersampling(self.undersampling_ratio)
+        hard_dataset = IM.SMOTE(self.osf) if self.smote else IM.random_oversampling(self.osf)
+        easy_dataset = IM.random_undersampling(self.usr)
         print(f'Added {len(hard_dataset) - old_hard_size} hard samples via oversampling, and removed '
               f'{len(easy_dataset) - old_easy_size} easy samples via undersampling. Continuing with {len(easy_dataset)} '
               f'easy data samples, and {len(hard_dataset)} hard data samples.')
