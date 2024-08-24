@@ -23,3 +23,5 @@ class LeNet(nn.Module):
         x = x.view(x.size(0), -1)
         x = self.fc(x)
         return x
+
+# TODO: Implement simple Neural Network for MNIST and repeat experiments to show results are model-agnostic

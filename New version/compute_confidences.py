@@ -20,6 +20,7 @@ if torch.cuda.is_available():
 def compute_hardness_indicators(models: List[torch.nn.Module], loader: DataLoader,
                                 weights: List[float]) -> List[Tuple[float, float, bool]]:
     """Compute BMA of confidences, margins, and track whether each sample was misclassified."""
+    # TODO: add average loss and other measures
     results = []
     with torch.no_grad():
         for data, targets in tqdm(loader, desc='Computing BMA confidences, margins, and misclassifications'):

@@ -1,5 +1,6 @@
 from typing import List, Tuple
 
+import torch
 from torch.utils.data import DataLoader, Subset, TensorDataset
 import numpy as np
 
@@ -22,15 +23,31 @@ class DatasetPreparer:
         hardness_indicators = u.load_data(f"{u.CONFIDENCES_SAVE_DIR}{self.dataset_name}_bma_hardness_indicators.pkl")
         # Split into easy and hard datasets
         easy_dataset, hard_dataset = self.identify_hard_and_easy_data(dataset, hardness_indicators)
-        # Mitigate imbalance if required
+        train_loaders, test_loaders = u.combine_and_split_data(hard_dataset, easy_dataset, self.dataset_name)
+        # Extract the datasets from the DataLoader objects (assuming batch_size = 1 for simplicity)
+        easy_train_data = []
+        easy_train_labels = []
+        hard_train_data = []
+        hard_train_labels = []
+        for data, labels in train_loaders[0]:  # Hard DataLoader
+            hard_train_data.append(data)
+            hard_train_labels.append(labels)
+        for data, labels in train_loaders[1]:  # Easy DataLoader
+            easy_train_data.append(data)
+            easy_train_labels.append(labels)
+        easy_train_data, easy_train_labels = torch.cat(easy_train_data), torch.cat(easy_train_labels)
+        hard_train_data, hard_train_labels = torch.cat(hard_train_data), torch.cat(hard_train_labels)
+        easy_dataset = TensorDataset(easy_train_data, easy_train_labels)
+        hard_dataset = TensorDataset(hard_train_data, hard_train_labels)
+        # Apply techniques against data imbalance
         old_easy_size, old_hard_size = len(easy_dataset), len(hard_dataset)
         IM = ImbalanceMeasures(easy_dataset, hard_dataset)
         hard_dataset = IM.SMOTE(self.osf) if self.smote else IM.random_oversampling(self.osf)
         easy_dataset = IM.random_undersampling(self.usr)
         print(f'Added {len(hard_dataset) - old_hard_size} hard samples via oversampling, and removed '
-              f'{len(easy_dataset) - old_easy_size} easy samples via undersampling. Continuing with {len(easy_dataset)} '
+              f'{old_easy_size - len(easy_dataset)} easy samples via undersampling. Continuing with {len(easy_dataset)} '
               f'easy data samples, and {len(hard_dataset)} hard data samples.')
-        return u.combine_and_split_data(hard_dataset, easy_dataset, self.dataset_name)
+        return train_loaders, test_loaders
 
     def identify_hard_and_easy_data(self, dataset: TensorDataset,
                                     hardness_indicators: List[Tuple[float, float, bool]]) -> Tuple[Subset, Subset]:
@@ -38,6 +55,8 @@ class DatasetPreparer:
         confidence_hard_indices = {i for i, (conf, _, _) in enumerate(hardness_indicators) if conf < self.threshold}
         margin_hard_indices = {i for i, (_, margin, _) in enumerate(hardness_indicators) if margin < self.threshold}
         misclassified_hard_indices = {i for i, (_, _, misclassified) in enumerate(hardness_indicators) if misclassified}
+        # TODO: currently runs with all 3, run with only one and set different thresholds (use % thresholds not absolute)
+        # TODO: add different hardness identifiers
 
         # Combine hard indices from all conditions without duplicates
         combined_hard_indices = confidence_hard_indices.union(margin_hard_indices).union(misclassified_hard_indices)
