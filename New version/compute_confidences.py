@@ -17,10 +17,57 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed_all(42)
 
 
+def visualize_hardness_indicators(hardness_indicators: List[Tuple[float, float, int]], num_models: int):
+    """
+    Visualize how the number of hard samples changes as we adjust the threshold for confidence, margin, and misclassification.
+
+    :param hardness_indicators: List of tuples containing (confidence, margin, misclassification count) for each sample.
+    :param num_models: The number of models in the ensemble (used as the upper bound for misclassification thresholds).
+    """
+    # Define the thresholds
+    confidence_thresholds = np.linspace(0, 1, 100)  # Confidence thresholds from 0 to 1
+    margin_thresholds = np.linspace(0, 1, 100)      # Margin thresholds from 0 to 1
+    misclassification_thresholds = np.arange(0, num_models + 1)  # Misclassification thresholds from 0 to num_models
+    confidence_hard_counts = []
+    margin_hard_counts = []
+    misclassification_hard_counts = []
+    # Loop over thresholds to calculate hard sample counts
+    for threshold in confidence_thresholds:
+        confidence_hard = sum(1 for conf, _, _ in hardness_indicators if conf < threshold)
+        confidence_hard_counts.append(confidence_hard)
+    for threshold in margin_thresholds:
+        margin_hard = sum(1 for _, margin, _ in hardness_indicators if margin < threshold)
+        margin_hard_counts.append(margin_hard)
+    for threshold in misclassification_thresholds:
+        misclassification_hard = sum(1 for _, _, misclassified in hardness_indicators if misclassified >= threshold)
+        misclassification_hard_counts.append(misclassification_hard)
+    # Plot the results
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+    # Plot Confidence-based hardness
+    axes[0].plot(confidence_thresholds, confidence_hard_counts, label='Confidence-based Hard Samples', color='blue')
+    axes[0].set_title("Confidence-based Hardness")
+    axes[0].set_xlabel("Threshold")
+    axes[0].set_ylabel("Number of Hard Samples")
+    axes[0].legend()
+    # Plot Margin-based hardness
+    axes[1].plot(margin_thresholds, margin_hard_counts, label='Margin-based Hard Samples', color='green')
+    axes[1].set_title("Margin-based Hardness")
+    axes[1].set_xlabel("Threshold")
+    axes[1].set_ylabel("Number of Hard Samples")
+    axes[1].legend()
+    # Plot Misclassification-based hardness
+    axes[2].plot(misclassification_thresholds, misclassification_hard_counts, label='Misclassification-based Hard Samples', color='red')
+    axes[2].set_title("Misclassification-based Hardness")
+    axes[2].set_xlabel("Number of Misclassifications")
+    axes[2].set_ylabel("Number of Hard Samples")
+    axes[2].legend()
+    plt.tight_layout()
+    plt.show()
+
+
 def compute_hardness_indicators(models: List[torch.nn.Module], loader: DataLoader,
-                                weights: List[float]) -> List[Tuple[float, float, bool]]:
-    """Compute BMA of confidences, margins, and track whether each sample was misclassified."""
-    # TODO: add average loss and other measures
+                                weights: List[float]) -> List[Tuple[float, float, int]]:
+    """Compute BMA of confidences, margins, and track the number of times each sample was misclassified."""
     results = []
     with torch.no_grad():
         for data, targets in tqdm(loader, desc='Computing BMA confidences, margins, and misclassifications'):
@@ -38,14 +85,13 @@ def compute_hardness_indicators(models: List[torch.nn.Module], loader: DataLoade
                 weighted_confidences.append(weight * max_probs.cpu().numpy())
                 weighted_margins.append(weight * (max_probs - second_max_probs).cpu().numpy())
                 all_predictions.append(max_indices)
-            # Compute and store Bayesian Model Averages
+            # Compute Bayesian Model Averages
             avg_confidences = np.sum(weighted_confidences, axis=0)
             avg_margins = np.sum(weighted_margins, axis=0)
-            # Majority vote for ensemble prediction
-            ensemble_predictions = torch.stack(all_predictions).mode(dim=0)[0]
-            misclassifications = ensemble_predictions != targets
-
-            results.extend(zip(avg_confidences, avg_margins, misclassifications.cpu().numpy()))
+            # Count how many times the sample was misclassified across all models
+            all_predictions = torch.stack(all_predictions)
+            misclassification_counts = torch.sum(all_predictions != targets.unsqueeze(0), dim=0).cpu().numpy()
+            results.extend(zip(avg_confidences, avg_margins, misclassification_counts))
     return results
 
 
@@ -83,13 +129,13 @@ def main(dataset_name: str, models_count: int, averaging_type: str):
         if averaging_type == 'MEAN':
             model_weights = [1.0 / models_count] * models_count
         elif averaging_type == 'BMA':
-            # For now, default to uniform weights; you'll implement BMA logic later
             model_weights = [1.0 / models_count] * models_count
         else:
             raise ValueError("Averaging type must be 'BMA' or 'MEAN'.")
     # Compute and save Bayesian Model Averaging confidences, margins, and misclassifications
     hardness_indicators = compute_hardness_indicators(models, loader, model_weights)
     u.save_data(hardness_indicators, f"{u.CONFIDENCES_SAVE_DIR}{dataset_name}_bma_hardness_indicators.pkl")
+    visualize_hardness_indicators(hardness_indicators, num_models=models_count)
     # Show the samples with the lowest BMA confidence
     labels = [label for _, label in dataset]
     show_lowest_confidence_samples(dataset, hardness_indicators, labels, n=30)

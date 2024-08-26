@@ -2,7 +2,6 @@ import argparse
 from typing import Dict, List, Tuple
 
 from torch.utils.data import DataLoader
-from prettytable import PrettyTable
 
 import utils as u
 from prepare_dataset import DatasetPreparer
