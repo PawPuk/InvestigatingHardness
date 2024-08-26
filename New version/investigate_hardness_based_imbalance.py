@@ -73,5 +73,7 @@ if __name__ == '__main__':
                              '1.0 keeps the size of easy samples the same as the easy dataset size. '
                              'Values in between allow partial undersampling.')
     parser.add_argument('--smote', type=bool, default=False)  # TODO: finish
+    parser.add_argument('--training_data', type=str, choices=['hard, easy, all'], default='all',
+                        help='')
     args = parser.parse_args()
     main(**vars(args))
