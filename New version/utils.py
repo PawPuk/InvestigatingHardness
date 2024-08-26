@@ -12,6 +12,7 @@ from torchvision import datasets, transforms
 
 EPSILON = 0.000000001  # cutoff for the computation of the variance in the standardisation
 EPOCHS = 10
+BATCH_SIZE = 32
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 CRITERION = torch.nn.CrossEntropyLoss()
 CONFIDENCES_SAVE_DIR = "confidences/"
@@ -128,15 +129,10 @@ def combine_and_split_data(hard_dataset: Subset, easy_dataset: Subset,
     Combines easy and hard data samples into a single dataset, then splits it into train and test sets while
     maintaining the same easy:hard ratio in both splits and keeping the overall train:test ratio as defined.
 
-    Generates four training sets:
-    1. Full training set (hard + easy).
-    2. Hard-only training set.
-    3. Easy-only training set.
-
     :param hard_dataset: identified hard samples (Subset)
     :param easy_dataset: identified easy samples (Subset)
     :param dataset_name: name of the used dataset
-    :return: A list containing 3 training DataLoaders (for hard, easy, all data), and test loaders.
+    :return: A list containing 2 training DataLoaders (for hard, easy), and 2 test loaders (for hard, easy, all data).
     """
     train_test_ratio = 6 / 7 if dataset_name == 'MNIST' else 5 / 6 if dataset_name == 'CIFAR10' else 8 / 10
 
@@ -171,8 +167,8 @@ def combine_and_split_data(hard_dataset: Subset, easy_dataset: Subset,
 
     # Create DataLoaders for full, hard-only, full easy, and easy subset training sets
     train_loaders = [
-        DataLoader(TensorDataset(hard_train_data, hard_train_target), batch_size=32, shuffle=True),  # Hard-only
-        DataLoader(TensorDataset(easy_train_data, easy_train_target), batch_size=32, shuffle=True),  # Easy-only
+        DataLoader(TensorDataset(hard_train_data, hard_train_target), batch_size=BATCH_SIZE, shuffle=True),  # Hard-only
+        DataLoader(TensorDataset(easy_train_data, easy_train_target), batch_size=BATCH_SIZE, shuffle=True),  # Easy-only
     ]
 
     # Create DataLoaders for the test sets (hard, easy, all)

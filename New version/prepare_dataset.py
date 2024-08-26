@@ -1,7 +1,7 @@
 from typing import List, Tuple
 
 import torch
-from torch.utils.data import DataLoader, Subset, TensorDataset
+from torch.utils.data import ConcatDataset, DataLoader, Subset, TensorDataset
 import numpy as np
 
 import utils as u
@@ -17,29 +17,20 @@ class DatasetPreparer:
         self.usr = undersampling_ratio
         self.smote = smote
 
-    def load_and_prepare_data(self) -> Tuple[List[DataLoader], List[DataLoader]]:
+    def load_and_prepare_data(self) -> Tuple[DataLoader, DataLoader, DataLoader, List[DataLoader]]:
         # Load and normalize dataset
         dataset = u.load_data_and_normalize(self.dataset_name)
         hardness_indicators = u.load_data(f"{u.CONFIDENCES_SAVE_DIR}{self.dataset_name}_bma_hardness_indicators.pkl")
         # Split into easy and hard datasets
         easy_dataset, hard_dataset = self.identify_hard_and_easy_data(dataset, hardness_indicators)
+        # Split data into training and test sets (initial loaders)
         train_loaders, test_loaders = u.combine_and_split_data(hard_dataset, easy_dataset, self.dataset_name)
-        # Extract the datasets from the DataLoader objects (assuming batch_size = 1 for simplicity)
-        easy_train_data = []
-        easy_train_labels = []
-        hard_train_data = []
-        hard_train_labels = []
-        for data, labels in train_loaders[0]:  # Hard DataLoader
-            hard_train_data.append(data)
-            hard_train_labels.append(labels)
-        for data, labels in train_loaders[1]:  # Easy DataLoader
-            easy_train_data.append(data)
-            easy_train_labels.append(labels)
-        easy_train_data, easy_train_labels = torch.cat(easy_train_data), torch.cat(easy_train_labels)
-        hard_train_data, hard_train_labels = torch.cat(hard_train_data), torch.cat(hard_train_labels)
+        # Extract the datasets from the DataLoader objects
+        easy_train_data, easy_train_labels = self._extract_from_loader(train_loaders[1])
+        hard_train_data, hard_train_labels = self._extract_from_loader(train_loaders[0])
         easy_dataset = TensorDataset(easy_train_data, easy_train_labels)
         hard_dataset = TensorDataset(hard_train_data, hard_train_labels)
-        # Apply techniques against data imbalance
+        # Apply resampling techniques to the training data
         old_easy_size, old_hard_size = len(easy_dataset), len(hard_dataset)
         IM = ImbalanceMeasures(easy_dataset, hard_dataset)
         hard_dataset = IM.SMOTE(self.osf) if self.smote else IM.random_oversampling(self.osf)
@@ -47,7 +38,21 @@ class DatasetPreparer:
         print(f'Added {len(hard_dataset) - old_hard_size} hard samples via oversampling, and removed '
               f'{old_easy_size - len(easy_dataset)} easy samples via undersampling. Continuing with {len(easy_dataset)} '
               f'easy data samples, and {len(hard_dataset)} hard data samples.')
-        return train_loaders, test_loaders
+        # Create separate DataLoaders for easy, hard, and combined datasets
+        train_loader_easy = DataLoader(easy_dataset, batch_size=u.BATCH_SIZE, shuffle=True)
+        train_loader_hard = DataLoader(hard_dataset, batch_size=u.BATCH_SIZE, shuffle=True)
+        combined_dataset = ConcatDataset([easy_dataset, hard_dataset])
+        train_loader_all = DataLoader(combined_dataset, batch_size=u.BATCH_SIZE, shuffle=True)
+        return train_loader_hard, train_loader_easy, train_loader_all, test_loaders
+
+    @staticmethod
+    def _extract_from_loader(loader: DataLoader) -> Tuple[torch.Tensor, torch.Tensor]:
+        data = []
+        labels = []
+        for batch_data, batch_labels in loader:
+            data.append(batch_data)
+            labels.append(batch_labels)
+        return torch.cat(data), torch.cat(labels)
 
     def identify_hard_and_easy_data(self, dataset: TensorDataset,
                                     hardness_indicators: List[Tuple[float, float, bool]]) -> Tuple[Subset, Subset]:

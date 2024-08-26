@@ -38,28 +38,21 @@ def train_and_evaluate_ensemble(train_loader: DataLoader, test_loaders: List[Dat
 
 
 def main(dataset_name: str, models_count: int, threshold: float, oversampling_factor: float, undersampling_ratio: float,
-         smote: bool):
+         smote: bool, training_data = str):
     # Generate custom training and test splits and apply measures against hardness-based data imbalance.
-    DP = DatasetPreparer(dataset_name, threshold, oversampling_factor, undersampling_ratio)
-    train_loaders, test_loaders = DP.load_and_prepare_data()
-    # Train and evaluate on all training sets
-    results = {
-        'Hard': train_and_evaluate_ensemble(train_loaders[0], test_loaders, dataset_name, models_count),
-        'Easy': train_and_evaluate_ensemble(train_loaders[1], test_loaders, dataset_name, models_count),
-        'All': train_and_evaluate_ensemble(train_loaders[2], test_loaders, dataset_name, models_count)
-    }
-    u.save_data(results, f"{u.ACCURACIES_SAVE_DIR}{dataset_name}_osf_{oversampling_factor}_usr_{undersampling_ratio}.pkl")
-    # Create a 3x3 table with Training sets as rows and Test sets as columns
-    table = PrettyTable()
-    table.field_names = ["Training Set / Test Set", "Hard", "Easy", "All"]
-    # Populate the table with the results
-    for train_set_name in ['Hard', 'Easy', 'All']:
-        row = [train_set_name]
-        for test_set_name in ['hard', 'easy', 'all']:
-            mean_accuracy, std_accuracy = results[train_set_name][test_set_name]
-            row.append(f"{mean_accuracy:.2f} ± {std_accuracy:.2f}")
-        table.add_row(row)
-    print(table)
+    DP = DatasetPreparer(dataset_name, threshold, oversampling_factor, undersampling_ratio, smote)
+    train_loader_all, train_loader_hard, train_loader_easy, test_loaders = DP.load_and_prepare_data()
+    train_loader = train_loader_hard if training_data == 'hard' else train_loader_easy if training_data == 'easy' else train_loader_all
+    # Train and evaluate on the selected training set
+    results = train_and_evaluate_ensemble(train_loader, test_loaders, dataset_name, models_count)
+    u.save_data(results, f"{u.ACCURACIES_SAVE_DIR}{training_data}{dataset_name}_osf_{oversampling_factor}_usr_{undersampling_ratio}.pkl")
+    # Print results as a formatted string
+    print(f"Results for {training_data} training set:")
+    for test_set_name in ['hard', 'easy', 'all']:
+        mean_accuracy, std_accuracy = results[test_set_name]
+        print(f"Test Set: {test_set_name.capitalize()}")
+        print(f"Mean Accuracy: {mean_accuracy:.2f} ± {std_accuracy:.2f}")
+        print("-" * 40)  # Divider for clarity
 
 
 if __name__ == '__main__':
