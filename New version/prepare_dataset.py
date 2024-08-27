@@ -9,9 +9,10 @@ from imbalance_measures import ImbalanceMeasures
 
 
 class DatasetPreparer:
-    def __init__(self, dataset_name: str, threshold: float, oversampling_factor: float, undersampling_ratio: float,
-                 smote: bool = False):
+    def __init__(self, dataset_name: str, models_count: int, threshold: float, oversampling_factor: float,
+                 undersampling_ratio: float, smote: bool = False):
         self.dataset_name = dataset_name
+        self.models_count = models_count
         self.threshold = threshold
         self.osf = oversampling_factor
         self.usr = undersampling_ratio
@@ -26,18 +27,19 @@ class DatasetPreparer:
         # Split data into training and test sets (initial loaders)
         train_loaders, test_loaders = u.combine_and_split_data(hard_dataset, easy_dataset, self.dataset_name)
         # Extract the datasets from the DataLoader objects
-        easy_train_data, easy_train_labels = self._extract_from_loader(train_loaders[1])
         hard_train_data, hard_train_labels = self._extract_from_loader(train_loaders[0])
+        easy_train_data, easy_train_labels = self._extract_from_loader(train_loaders[1])
         easy_dataset = TensorDataset(easy_train_data, easy_train_labels)
         hard_dataset = TensorDataset(hard_train_data, hard_train_labels)
         # Apply resampling techniques to the training data
         old_easy_size, old_hard_size = len(easy_dataset), len(hard_dataset)
-        IM = ImbalanceMeasures(easy_dataset, hard_dataset)
+        IM = ImbalanceMeasures(easy_dataset, hard_dataset, self.dataset_name, self.models_count, self.threshold)
         hard_dataset = IM.SMOTE(self.osf) if self.smote else IM.random_oversampling(self.osf)
         easy_dataset = IM.random_undersampling(self.usr)
         print(f'Added {len(hard_dataset) - old_hard_size} hard samples via oversampling, and removed '
               f'{old_easy_size - len(easy_dataset)} easy samples via undersampling. Continuing with {len(easy_dataset)} '
-              f'easy data samples, and {len(hard_dataset)} hard data samples.')
+              f'easy training samples, and {len(hard_dataset)} hard training samples. For test set we use '
+              f'{len(test_loaders[0].dataset)} hard data samples, and {len(test_loaders[1].dataset)} easy data samples.')
         # Create separate DataLoaders for easy, hard, and combined datasets
         train_loader_easy = DataLoader(easy_dataset, batch_size=u.BATCH_SIZE, shuffle=True)
         train_loader_hard = DataLoader(hard_dataset, batch_size=u.BATCH_SIZE, shuffle=True)
@@ -59,7 +61,7 @@ class DatasetPreparer:
         """Split the dataset into easy and hard samples based on confidence, margin, and misclassification."""
         confidence_hard_indices = {i for i, (conf, _, _) in enumerate(hardness_indicators) if conf < self.threshold}
         margin_hard_indices = {i for i, (_, margin, _) in enumerate(hardness_indicators) if margin < self.threshold}
-        misclassified_hard_indices = {i for i, (_, _, misclassified) in enumerate(hardness_indicators) if misclassified}
+        misclassified_hard_indices = {i for i, (_, _, misclassified) in enumerate(hardness_indicators) if misclassified > 5}
         # TODO: currently runs with all 3, run with only one and set different thresholds (use % thresholds not absolute)
         # TODO: add different hardness identifiers
 

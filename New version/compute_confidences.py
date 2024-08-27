@@ -25,9 +25,9 @@ def visualize_hardness_indicators(hardness_indicators: List[Tuple[float, float, 
     :param num_models: The number of models in the ensemble (used as the upper bound for misclassification thresholds).
     """
     # Define the thresholds
-    confidence_thresholds = np.linspace(0, 1, 100)  # Confidence thresholds from 0 to 1
-    margin_thresholds = np.linspace(0, 1, 100)      # Margin thresholds from 0 to 1
-    misclassification_thresholds = np.arange(0, num_models + 1)  # Misclassification thresholds from 0 to num_models
+    confidence_thresholds = np.linspace(0.8, 1, 100)
+    margin_thresholds = np.linspace(0.8, 1, 100)
+    misclassification_thresholds = np.arange(1, num_models + 1)
     confidence_hard_counts = []
     margin_hard_counts = []
     misclassification_hard_counts = []
@@ -44,24 +44,22 @@ def visualize_hardness_indicators(hardness_indicators: List[Tuple[float, float, 
     # Plot the results
     fig, axes = plt.subplots(1, 3, figsize=(18, 6))
     # Plot Confidence-based hardness
-    axes[0].plot(confidence_thresholds, confidence_hard_counts, label='Confidence-based Hard Samples', color='blue')
+    axes[0].plot(confidence_thresholds, confidence_hard_counts, color='blue')
     axes[0].set_title("Confidence-based Hardness")
     axes[0].set_xlabel("Threshold")
     axes[0].set_ylabel("Number of Hard Samples")
-    axes[0].legend()
     # Plot Margin-based hardness
-    axes[1].plot(margin_thresholds, margin_hard_counts, label='Margin-based Hard Samples', color='green')
+    axes[1].plot(margin_thresholds, margin_hard_counts, color='green')
     axes[1].set_title("Margin-based Hardness")
     axes[1].set_xlabel("Threshold")
     axes[1].set_ylabel("Number of Hard Samples")
-    axes[1].legend()
     # Plot Misclassification-based hardness
-    axes[2].plot(misclassification_thresholds, misclassification_hard_counts, label='Misclassification-based Hard Samples', color='red')
+    axes[2].plot(misclassification_thresholds, misclassification_hard_counts, color='red')
     axes[2].set_title("Misclassification-based Hardness")
     axes[2].set_xlabel("Number of Misclassifications")
     axes[2].set_ylabel("Number of Hard Samples")
-    axes[2].legend()
     plt.tight_layout()
+    plt.savefig('Hardness_indicators.pdf')
     plt.show()
 
 
