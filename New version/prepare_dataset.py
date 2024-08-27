@@ -10,13 +10,13 @@ from imbalance_measures import ImbalanceMeasures
 
 class DatasetPreparer:
     def __init__(self, dataset_name: str, models_count: int, threshold: float, oversampling_factor: float,
-                 undersampling_ratio: float, smote: bool = False):
+                 undersampling_ratio: float, mixup: bool = False):
         self.dataset_name = dataset_name
         self.models_count = models_count
         self.threshold = threshold
         self.osf = oversampling_factor
         self.usr = undersampling_ratio
-        self.smote = smote
+        self.mixup = mixup
 
     def load_and_prepare_data(self) -> Tuple[DataLoader, DataLoader, DataLoader, List[DataLoader]]:
         # Load and normalize dataset
@@ -34,7 +34,7 @@ class DatasetPreparer:
         # Apply resampling techniques to the training data
         old_easy_size, old_hard_size = len(easy_dataset), len(hard_dataset)
         IM = ImbalanceMeasures(easy_dataset, hard_dataset, self.dataset_name, self.models_count, self.threshold)
-        hard_dataset = IM.SMOTE(self.osf) if self.smote else IM.random_oversampling(self.osf)
+        hard_dataset = IM.MixUp(self.osf) if self.mixup else IM.random_oversampling(self.osf)
         easy_dataset = IM.random_undersampling(self.usr)
         print(f'Added {len(hard_dataset) - old_hard_size} hard samples via oversampling, and removed '
               f'{old_easy_size - len(easy_dataset)} easy samples via undersampling. Continuing with {len(easy_dataset)} '

@@ -37,39 +37,59 @@ def calculate_mean_std(accuracies: List[float]) -> Tuple[float, float]:
     return np.mean(accuracies), np.std(accuracies)
 
 
-def load_data_and_normalize(dataset_name: str) -> TensorDataset:
-    """ Used to load the data from common datasets available in torchvision, and normalize them. The normalization
-    is based on the mean and std of a random subset of the dataset of the size subset_size.
-
-    :param dataset_name: name of the dataset to load. It has to be available in `torchvision.datasets`
-    :return: random, normalized subset of dataset_name of size subset_size with (noise_rate*subset_size) labels changed
-    to introduce label noise
+def load_data_and_normalize(dataset_name: str, long_tailed: bool = False,
+                            imbalance_ratio: float = 1.0) -> Tuple[Dataset, Dataset]:
     """
-    # Load the train and test datasets based on the 'dataset_name' parameter
-    train_dataset = getattr(datasets, dataset_name)(root="./data", train=True, download=True,
-                                                    transform=transforms.ToTensor())
-    test_dataset = getattr(datasets, dataset_name)(root="./data", train=False, download=True,
-                                                   transform=transforms.ToTensor())
-    if dataset_name == 'CIFAR10':
-        train_data = torch.tensor(train_dataset.data).permute(0, 3, 1, 2).float()
-        test_data = torch.tensor(test_dataset.data).permute(0, 3, 1, 2).float()
+    Load and normalize the dataset. Optionally, modify the dataset to be long-tailed for the training set.
+
+    :param dataset_name: name of the dataset to load. It has to be available in `torchvision.datasets`.
+    :param long_tailed: If True, modify the dataset to create a long-tailed distribution.
+    :param imbalance_ratio: Controls the degree of imbalance in the long-tailed distribution. Should be > 1.
+    :return: Two TensorDatasets - one for training data and another for test data.
+    """
+    # Load train and test datasets using torchvision
+    if dataset_name == 'MNIST':
+        train_dataset = datasets.MNIST(root="./data", train=True, download=True, transform=transforms.ToTensor())
+        test_dataset = datasets.MNIST(root="./data", train=False, download=True, transform=transforms.ToTensor())
+    elif dataset_name == 'CIFAR10':
+        train_dataset = datasets.CIFAR10(root="./data", train=True, download=True, transform=transforms.ToTensor())
+        test_dataset = datasets.CIFAR10(root="./data", train=False, download=True, transform=transforms.ToTensor())
+    elif dataset_name == 'CIFAR100':
+        train_dataset = datasets.CIFAR100(root="./data", train=True, download=True, transform=transforms.ToTensor())
+        test_dataset = datasets.CIFAR100(root="./data", train=False, download=True, transform=transforms.ToTensor())
     else:
-        train_data = train_dataset.data.unsqueeze(1).float()
-        test_data = test_dataset.data.unsqueeze(1).float()
-    # Concatenate train and test datasets
-    full_data = torch.cat([train_data, test_data])
-    full_targets = torch.cat([torch.tensor(train_dataset.targets), torch.tensor(test_dataset.targets)])
-    # Shuffle the combined dataset
-    np.random.seed(42)
-    shuffled_indices = np.random.permutation(len(full_data))
-    full_data, full_targets = full_data[torch.tensor(shuffled_indices)], full_targets[torch.tensor(shuffled_indices)]
-    # Normalize the data
-    data_means = torch.mean(full_data, dim=(0, 2, 3)) / 255.0
-    data_vars = torch.sqrt(torch.var(full_data, dim=(0, 2, 3)) / 255.0 ** 2 + EPSILON)
-    # Apply the calculated normalization to the subset
-    normalize_transform = transforms.Normalize(mean=data_means, std=data_vars)
-    normalized_subset_data = normalize_transform(full_data / 255.0)
-    return TensorDataset(normalized_subset_data, full_targets)
+        raise ValueError("Unsupported dataset. Please use MNIST, CIFAR10, or CIFAR100.")
+    # Apply long-tailed distribution if needed
+    if long_tailed:
+        num_classes = len(np.unique(train_dataset.targets))
+        class_counts = np.zeros(num_classes, dtype=int)
+        # Generate the number of samples per class based on the imbalance ratio
+        max_count = len(train_dataset) // num_classes
+        for i in range(num_classes):
+            class_counts[i] = int(max_count * (imbalance_ratio ** (-i / (num_classes - 1))))
+        # Reduce the dataset to create the long-tailed distribution
+        indices = []
+        for class_idx in range(num_classes):
+            class_indices = torch.where(torch.tensor(train_dataset.targets) == class_idx)[0].tolist()
+            np.random.shuffle(class_indices)
+            indices.extend(class_indices[:class_counts[class_idx]])
+        # Subset the training data
+        train_dataset.data = train_dataset.data[indices]
+        train_dataset.targets = torch.tensor(train_dataset.targets)[indices]
+    # Compute mean and std on the modified training set
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=len(train_dataset), shuffle=False)
+    train_data, train_targets = next(iter(train_loader))  # Extract all training data
+    mean = train_data.mean(dim=[0, 2, 3])  # Compute mean across batch, height, and width dimensions
+    std = train_data.std(dim=[0, 2, 3])  # Compute std across batch, height, and width dimensions
+    # Create normalization transform using the computed mean and std from the training set
+    normalize_transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(mean=mean, std=std)
+    ])
+    # Apply normalization to both training and test datasets
+    train_dataset.transform = normalize_transform
+    test_dataset.transform = normalize_transform
+    return train_dataset, test_dataset
 
 
 def train(dataset_name: str, model: torch.nn.Module, loader: DataLoader, optimizer: Union[Adam, SGD],

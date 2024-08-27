@@ -37,9 +37,9 @@ def train_and_evaluate_ensemble(train_loader: DataLoader, test_loaders: List[Dat
 
 
 def main(dataset_name: str, models_count: int, threshold: float, oversampling_factor: float, undersampling_ratio: float,
-         smote: bool, training_data = str):
+         mixup: bool, training_data = str):
     # Generate custom training and test splits and apply measures against hardness-based data imbalance.
-    DP = DatasetPreparer(dataset_name, models_count, threshold, oversampling_factor, undersampling_ratio, smote)
+    DP = DatasetPreparer(dataset_name, models_count, threshold, oversampling_factor, undersampling_ratio, mixup)
     train_loader_all, train_loader_hard, train_loader_easy, test_loaders = DP.load_and_prepare_data()
     train_loader = train_loader_hard if training_data == 'hard' else train_loader_easy if training_data == 'easy' else train_loader_all
     # Train and evaluate on the selected training set
@@ -71,7 +71,7 @@ if __name__ == '__main__':
                              '0.0 reduces the size of easy samples to match the hard dataset size, '
                              '1.0 keeps the size of easy samples the same as the easy dataset size. '
                              'Values in between allow partial undersampling.')
-    parser.add_argument('--smote', default=False, action='store_true',
+    parser.add_argument('--mixup', default=False, action='store_true',
                         help='')  # TODO: finish
     parser.add_argument('--training_data', type=str, choices=['hard, easy, all'], default='all',
                         help='')
