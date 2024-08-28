@@ -1,5 +1,5 @@
 import argparse
-from typing import List, Tuple
+from typing import List, Tuple, Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -16,8 +16,7 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed_all(42)
 
 
-def visualize_hardness_indicators(hardness_indicators: List[Tuple[float, float, int, float, float, float]],
-                                  num_models: int):
+def visualize_hardness_indicators(hardness_indicators: List[Tuple[Any, ...]], num_models: int):
     """
     Visualize how the number of hard samples changes as we adjust the threshold for various hardness metrics
     and visualize the overlap between these metrics.
@@ -95,8 +94,8 @@ def visualize_hardness_indicators(hardness_indicators: List[Tuple[float, float, 
     plt.show()
 
 
-def compute_hardness_indicators(models: List[torch.nn.Module],
-                                loader: DataLoader) -> List[Tuple[float, float, int, float, float, float]]:
+def compute_hardness_indicators(models: List[torch.nn.Module], loader: DataLoader,
+                                models_count: int) -> list[tuple[Any, ...]]:
     """Compute BMA of confidences, margins, and track the number of times each sample was misclassified."""
     # TODO: add other hardness indicators (maybe loss and gradient)
     results = []
@@ -126,7 +125,7 @@ def compute_hardness_indicators(models: List[torch.nn.Module],
                 # Gradient (approximate gradient by computing gradients of loss w.r.t inputs)
                 gradients = torch.autograd.grad(outputs=losses.sum(), inputs=data, create_graph=False)[0]
                 gradient_magnitudes = gradients.view(
-                    gradients.size(0), -1).norm(2,dim=1).cpu().numpy()  # L2 norm of gradients
+                    gradients.size(0), -1).norm(2, dim=1).cpu().numpy()  # L2 norm of gradients
                 total_gradients.append(gradient_magnitudes)
                 # Entropy
                 entropies = -torch.sum(probabilities * torch.log(probabilities + 1e-8), dim=1).cpu().numpy()
@@ -142,6 +141,7 @@ def compute_hardness_indicators(models: List[torch.nn.Module],
             misclassification_counts = torch.sum(all_predictions != targets.unsqueeze(0), dim=0).cpu().numpy()
             results.extend(
                 zip(avg_confidences, avg_margins, misclassification_counts, avg_losses, avg_gradients, avg_entropies))
+        visualize_hardness_indicators(results, models_count)
         return results
 
 
@@ -175,10 +175,9 @@ def main(dataset_name: str, models_count: int, long_tailed: bool, imbalance_rati
             f"{u.MODEL_SAVE_DIR}{dataset_name}_{models_count}_{imbalance_ratio}_ensemble_{i}.pth"))
         models.append(model)
     # Compute and save Bayesian Model Averaging confidences, margins, and misclassifications
-    hardness_indicators = compute_hardness_indicators(models, train_loader)
+    hardness_indicators = compute_hardness_indicators(models, train_loader, models_count)
     u.save_data(hardness_indicators,
                 f"{u.CONFIDENCES_SAVE_DIR}{dataset_name}_{imbalance_ratio}_bma_hardness_indicators.pkl")
-    visualize_hardness_indicators(hardness_indicators, models_count)
     # Show the samples with the lowest BMA confidence
     # labels = [label for _, label in train_dataset]
     # show_lowest_confidence_samples(train_dataset, hardness_indicators, labels, n=30)

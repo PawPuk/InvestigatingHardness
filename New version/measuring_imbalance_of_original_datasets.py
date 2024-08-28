@@ -37,12 +37,18 @@ def analyze_hard_sample_distribution(hardness_indicators: List[Tuple[float, floa
     num_samples = len(hardness_indicators)
     num_hard_samples = int(threshold * num_samples)
     # Sort by each metric and extract the hardest samples (top 5%)
-    confidence_sorted = sorted(enumerate(hardness_indicators), key=lambda x: x[1][0])[:num_hard_samples]  # Low confidence
-    margin_sorted = sorted(enumerate(hardness_indicators), key=lambda x: x[1][1])[:num_hard_samples]      # Low margin
-    misclassified_sorted = sorted(enumerate(hardness_indicators), key=lambda x: x[1][2], reverse=True)[:num_hard_samples]  # High misclassification count
-    loss_sorted = sorted(enumerate(hardness_indicators), key=lambda x: x[1][3], reverse=True)[:num_hard_samples]  # High loss
-    gradient_sorted = sorted(enumerate(hardness_indicators), key=lambda x: x[1][4], reverse=True)[:num_hard_samples]  # High gradient
-    entropy_sorted = sorted(enumerate(hardness_indicators), key=lambda x: x[1][5], reverse=True)[:num_hard_samples]  # High entropy
+    confidence_sorted = sorted(enumerate(
+        hardness_indicators), key=lambda x: x[1][0])[:num_hard_samples]  # Low confidence
+    margin_sorted = sorted(enumerate(
+        hardness_indicators), key=lambda x: x[1][1])[:num_hard_samples]      # Low margin
+    misclassified_sorted = sorted(enumerate(
+        hardness_indicators), key=lambda x: x[1][2], reverse=True)[:num_hard_samples]  # High misclassification count
+    loss_sorted = sorted(enumerate(
+        hardness_indicators), key=lambda x: x[1][3], reverse=True)[:num_hard_samples]  # High loss
+    gradient_sorted = sorted(enumerate(
+        hardness_indicators), key=lambda x: x[1][4], reverse=True)[:num_hard_samples]  # High gradient
+    entropy_sorted = sorted(enumerate(
+        hardness_indicators), key=lambda x: x[1][5], reverse=True)[:num_hard_samples]  # High entropy
     # Collect the indices of the hard samples for each metric
     metric_hard_samples['Confidence'] = [idx for idx, _ in confidence_sorted]
     metric_hard_samples['Margin'] = [idx for idx, _ in margin_sorted]
@@ -124,7 +130,7 @@ def main(dataset_name: str, models_count: int, threshold: float):
             class_accuracies[model_idx] = u.class_level_test(model, loader, num_classes)
         avg_class_accuracies = class_accuracies.mean(axis=0)
         # Identify hard samples and measure their distribution among classes
-        hardness_indicators = compute_hardness_indicators(trainer.get_trained_models(), loader)
+        hardness_indicators = compute_hardness_indicators(trainer.get_trained_models(), loader, models_count)
         # Save the computed results for future use
         np.save(accuracies_file, avg_class_accuracies)
         u.save_data(hardness_indicators, hardness_file)
@@ -139,7 +145,8 @@ def main(dataset_name: str, models_count: int, threshold: float):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        description='Analyze hard samples in the official training and test splits using precomputed hardness indicators.'
+        description='Analyze hard samples in the official training and test splits using precomputed hardness '
+                    'indicators.'
     )
     parser.add_argument('--dataset_name', type=str, default='MNIST',
                         help='Name of the dataset (MNIST, CIFAR10, CIFAR100).')
