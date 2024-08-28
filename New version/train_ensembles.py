@@ -1,4 +1,5 @@
 import argparse
+from typing import Union
 
 import numpy as np
 import torch
@@ -23,7 +24,8 @@ class EnsembleTrainer:
         self.save = save
         self.models = []
 
-    def train_ensemble(self, train_loader: DataLoader, test_loader: DataLoader, imbalanced_ratio):
+    def train_ensemble(self, train_loader: DataLoader, test_loader: Union[DataLoader, None] = None,
+                       imbalanced_ratio: float = 1.0):
         """Train an ensemble of models on the full dataset."""
         for i in tqdm(range(self.models_count)):
             model = LeNet().to(u.DEVICE)
