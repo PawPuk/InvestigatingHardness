@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from torch import Tensor
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 from neural_networks import LeNet
@@ -66,6 +66,7 @@ def visualize_hardness_indicators(hardness_indicators: List[Tuple[float, float, 
 def compute_hardness_indicators(models: List[torch.nn.Module], loader: DataLoader,
                                 weights: List[float]) -> List[Tuple[float, float, int]]:
     """Compute BMA of confidences, margins, and track the number of times each sample was misclassified."""
+    # TODO: add other hardness indicators (maybe loss and gradient)
     results = []
     with torch.no_grad():
         for data, targets in tqdm(loader, desc='Computing BMA confidences, margins, and misclassifications'):
@@ -93,8 +94,8 @@ def compute_hardness_indicators(models: List[torch.nn.Module], loader: DataLoade
     return results
 
 
-def show_lowest_confidence_samples(dataset: TensorDataset,
-                                   confidences_margins_misclassifications: List[Tuple[float, float, bool]],
+def show_lowest_confidence_samples(dataset: Dataset,
+                                   confidences_margins_misclassifications: List[Tuple[float, float, int]],
                                    labels: List[Tensor], n=30):
     """Display the n samples with the lowest BMA confidence."""
     confidences = [conf for conf, _, _ in confidences_margins_misclassifications]
@@ -113,30 +114,31 @@ def show_lowest_confidence_samples(dataset: TensorDataset,
     plt.show()
 
 
-def main(dataset_name: str, models_count: int, averaging_type: str):
-    dataset = u.load_data_and_normalize(dataset_name)
-    loader = DataLoader(dataset, batch_size=32, shuffle=False)
-    models = []
-    model_weights = []
+def main(dataset_name: str, models_count: int, averaging_type: str, long_tailed: bool, imbalance_ratio: float):
+    train_dataset, _ = u.load_data_and_normalize(dataset_name)
+    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=False)
+    models, model_weights = [], []
     # Load only the specified number of models
     for i in range(models_count):
         model = LeNet().to(u.DEVICE)
-        model.load_state_dict(torch.load(f"{u.MODEL_SAVE_DIR}{dataset_name}_{models_count}_ensemble_{i}.pth"))
+        model.load_state_dict(torch.load(
+            f"{u.MODEL_SAVE_DIR}{dataset_name}_{models_count}_{imbalance_ratio}_ensemble_{i}.pth"))
         models.append(model)
         # Determine weights based on averaging type
         if averaging_type == 'MEAN':
             model_weights = [1.0 / models_count] * models_count
         elif averaging_type == 'BMA':
-            model_weights = [1.0 / models_count] * models_count
+            model_weights = [1.0 / models_count] * models_count  # TODO: implement
         else:
             raise ValueError("Averaging type must be 'BMA' or 'MEAN'.")
     # Compute and save Bayesian Model Averaging confidences, margins, and misclassifications
-    hardness_indicators = compute_hardness_indicators(models, loader, model_weights)
-    u.save_data(hardness_indicators, f"{u.CONFIDENCES_SAVE_DIR}{dataset_name}_bma_hardness_indicators.pkl")
-    visualize_hardness_indicators(hardness_indicators, num_models=models_count)
+    hardness_indicators = compute_hardness_indicators(models, train_loader, model_weights)
+    u.save_data(hardness_indicators,
+                f"{u.CONFIDENCES_SAVE_DIR}{dataset_name}_{imbalance_ratio}_bma_hardness_indicators.pkl")
+    visualize_hardness_indicators(hardness_indicators, models_count)
     # Show the samples with the lowest BMA confidence
-    labels = [label for _, label in dataset]
-    show_lowest_confidence_samples(dataset, hardness_indicators, labels, n=30)
+    labels = [label for _, label in train_dataset]
+    show_lowest_confidence_samples(train_dataset, hardness_indicators, labels, n=30)
 
 
 if __name__ == '__main__':
@@ -146,5 +148,9 @@ if __name__ == '__main__':
     parser.add_argument('--models_count', type=int, default=20, help='Number of models in the ensemble.')
     parser.add_argument('--averaging_type', type=str, default='MEAN', choices=['BMA', 'MEAN'],
                         help='Averaging type for model confidences - either classical mean or Bayesian Model Average.')
+    parser.add_argument('--long_tailed', type=bool, default=False,
+                        help='Flag to indicate if the dataset should be long-tailed.')
+    parser.add_argument('--imbalance_ratio', type=float, default=1.0,
+                        help='Imbalance ratio for long-tailed dataset.')
     args = parser.parse_args()
     main(**vars(args))

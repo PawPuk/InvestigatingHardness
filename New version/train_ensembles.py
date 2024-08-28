@@ -1,5 +1,4 @@
 import argparse
-from typing import Union
 
 import numpy as np
 import torch
@@ -24,7 +23,7 @@ class EnsembleTrainer:
         self.save = save
         self.models = []
 
-    def train_ensemble(self, train_loader: DataLoader, test_loader: Union[DataLoader, None] = None):
+    def train_ensemble(self, train_loader: DataLoader, test_loader: DataLoader, imbalanced_ratio):
         """Train an ensemble of models on the full dataset."""
         for i in tqdm(range(self.models_count)):
             model = LeNet().to(u.DEVICE)
@@ -35,7 +34,7 @@ class EnsembleTrainer:
             # Save model state
             if self.save:
                 torch.save(model.state_dict(),
-                           f"{u.MODEL_SAVE_DIR}{self.dataset_name}_{self.models_count}_ensemble_{i}.pth",
+                           f"{u.MODEL_SAVE_DIR}{self.dataset_name}_{self.models_count}_{imbalanced_ratio}_ensemble_{i}.pth",
                            _use_new_zipfile_serialization=False)  # Ensuring backward compatibility
             # Evaluate on the training set
             if test_loader is not None:
@@ -52,7 +51,7 @@ def main(dataset_name: str, models_count: int, long_tailed: bool, imbalance_rati
     train_dataset, test_dataset = u.load_data_and_normalize(dataset_name, long_tailed, imbalance_ratio)
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=1000, shuffle=False)
-    trainer.train_ensemble(train_loader, test_loader)
+    trainer.train_ensemble(train_loader, test_loader, imbalance_ratio)
 
 
 if __name__ == '__main__':

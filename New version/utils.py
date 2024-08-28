@@ -94,6 +94,7 @@ def load_data_and_normalize(dataset_name: str, long_tailed: bool = False,
 
 def train(dataset_name: str, model: torch.nn.Module, loader: DataLoader, optimizer: Union[Adam, SGD],
           epochs: int = EPOCHS):
+    # TODO: modify to save learning-based hardness metrics like forgetting or memorization
     scheduler = CosineAnnealingLR(optimizer, T_max=epochs)
     for epoch in range(epochs):
         model.train()
