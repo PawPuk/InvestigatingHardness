@@ -54,7 +54,7 @@ def identify_hard_samples(hardness_indicators: List[Tuple[float, float, int, flo
 
 
 def compute_hardness_distributions(hard_samples: Dict[str, List[int]],
-                                   labels: List[int]) -> Dict[str, defaultdict[Any, int]]:
+                                   labels: List[int]) -> Dict[str, defaultdict]:
     """
     Compute the class-level distribution of the hardest samples based on different hardness metrics.
 

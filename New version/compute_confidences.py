@@ -95,54 +95,55 @@ def visualize_hardness_indicators(hardness_indicators: List[Tuple[Any, ...]], nu
 
 
 def compute_hardness_indicators(models: List[torch.nn.Module], loader: DataLoader,
-                                models_count: int) -> list[tuple[Any, ...]]:
+                                models_count: int) -> List[Tuple[Any, ...]]:
     """Compute BMA of confidences, margins, and track the number of times each sample was misclassified."""
     # TODO: add other hardness indicators (maybe loss and gradient)
     results = []
     loss_fn = torch.nn.CrossEntropyLoss(reduction='none')  # To compute per-sample loss
-    with torch.no_grad():
-        for data, targets in tqdm(loader, desc='Computing BMA confidences, margins, and misclassifications'):
-            data, targets = data.to(u.DEVICE), targets.to(u.DEVICE)
-            weighted_confidences = []
-            weighted_margins = []
-            all_predictions = []
-            total_losses = []
-            total_gradients = []
-            total_entropies = []
-            for model in models:
-                model.eval()
-                outputs = model(data)
-                probabilities = torch.nn.functional.softmax(outputs, dim=1)
-                # Confidence, Margin, and Missclasifications
-                max_probs, max_indices = torch.max(probabilities, dim=1)
-                second_max_probs = torch.topk(probabilities, 2, dim=1)[0][:, 1]
-                weighted_confidences.append(max_probs.cpu().numpy())
-                weighted_margins.append((max_probs - second_max_probs).cpu().numpy())
-                all_predictions.append(max_indices)
-                # Loss
-                losses = loss_fn(outputs, targets).cpu().numpy()
-                total_losses.append(losses)
-                # Gradient (approximate gradient by computing gradients of loss w.r.t inputs)
-                gradients = torch.autograd.grad(outputs=losses.sum(), inputs=data, create_graph=False)[0]
-                gradient_magnitudes = gradients.view(
-                    gradients.size(0), -1).norm(2, dim=1).cpu().numpy()  # L2 norm of gradients
-                total_gradients.append(gradient_magnitudes)
-                # Entropy
-                entropies = -torch.sum(probabilities * torch.log(probabilities + 1e-8), dim=1).cpu().numpy()
-                total_entropies.append(entropies)
-            # Compute averages
-            avg_confidences = np.mean(weighted_confidences, axis=0)
-            avg_margins = np.mean(weighted_margins, axis=0)
-            avg_losses = np.mean(total_losses, axis=0)
-            avg_gradients = np.mean(total_gradients, axis=0)
-            avg_entropies = np.mean(total_entropies, axis=0)
-            # Count how many times the sample was misclassified across all models
-            all_predictions = torch.stack(all_predictions)
-            misclassification_counts = torch.sum(all_predictions != targets.unsqueeze(0), dim=0).cpu().numpy()
-            results.extend(
-                zip(avg_confidences, avg_margins, misclassification_counts, avg_losses, avg_gradients, avg_entropies))
-        visualize_hardness_indicators(results, models_count)
-        return results
+    for data, targets in tqdm(loader, desc='Computing BMA confidences, margins, and misclassifications'):
+        data, targets = data.to(u.DEVICE), targets.to(u.DEVICE)
+        weighted_confidences = []
+        weighted_margins = []
+        all_predictions = []
+        total_losses = []
+        total_gradients = []
+        total_entropies = []
+        for model in models:
+            model.eval()
+            outputs = model(data)
+            probabilities = torch.nn.functional.softmax(outputs, dim=1)
+            # Confidence, Margin, and Missclasifications
+            max_probs, max_indices = torch.max(probabilities, dim=1)
+            second_max_probs = torch.topk(probabilities, 2, dim=1)[0][:, 1]
+            weighted_confidences.append(max_probs.cpu().numpy())
+            weighted_margins.append((max_probs - second_max_probs).cpu().numpy())
+            all_predictions.append(max_indices)
+            # Entropy
+            entropies = -torch.sum(probabilities * torch.log(probabilities + 1e-8), dim=1).cpu().numpy()
+            total_entropies.append(entropies)
+            # Loss
+            losses = loss_fn(outputs, targets)
+            total_losses.append(losses.cpu().numpy())
+            # Gradient (approximate gradient by computing gradients of loss w.r.t inputs)
+            print(losses)
+            print(torch.autograd.grad(outputs=losses.sum(), inputs=data, create_graph=False))
+            gradients = torch.autograd.grad(outputs=losses.sum(), inputs=data, create_graph=False)[0]
+            gradient_magnitudes = gradients.view(
+                gradients.size(0), -1).norm(2, dim=1).cpu().numpy()  # L2 norm of gradients
+            total_gradients.append(gradient_magnitudes)
+        # Compute averages
+        avg_confidences = np.mean(weighted_confidences, axis=0)
+        avg_margins = np.mean(weighted_margins, axis=0)
+        avg_losses = np.mean(total_losses, axis=0)
+        avg_gradients = np.mean(total_gradients, axis=0)
+        avg_entropies = np.mean(total_entropies, axis=0)
+        # Count how many times the sample was misclassified across all models
+        all_predictions = torch.stack(all_predictions)
+        misclassification_counts = torch.sum(all_predictions != targets.unsqueeze(0), dim=0).cpu().numpy()
+        results.extend(
+            zip(avg_confidences, avg_margins, misclassification_counts, avg_losses, avg_gradients, avg_entropies))
+    visualize_hardness_indicators(results, models_count)
+    return results
 
 
 """def show_lowest_confidence_samples(dataset: Dataset,
