@@ -7,7 +7,7 @@ import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from geometric_measures import Curvature
+from geometric_measures import Curvature, Proximity
 from neural_networks import LeNet
 import utils as u
 
@@ -17,15 +17,11 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed_all(42)
 
 
-
 def compute_hardness_indicators(loader: DataLoader):
-    """Compute the geometric metrics of the data that can be used to identify hard samples"""
-    results = []
-    for data, targets in tqdm(loader, desc='Computing BMA confidences, margins, and misclassifications'):
-        data, targets = data.to(u.DEVICE), targets.to(u.DEVICE)
-        curvatures = Curvature(data).curvatures(curvature_type='gaussian')
-        results.extend(curvatures)
-    return results
+    """Compute the geometric metrics of the data that can be used to identify hard samples, class-wise."""
+    proximity = Proximity(loader)
+    proximity_ratios = proximity.compute_proximity_ratios()
+    return proximity_ratios
 
 
 def main(dataset_name: str, models_count: int, long_tailed: bool, imbalance_ratio: float):

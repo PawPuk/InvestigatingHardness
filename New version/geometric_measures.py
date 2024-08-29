@@ -1,6 +1,11 @@
 import numpy as np
+import torch
+from torch.utils.data import DataLoader
 from sklearn.neighbors import NearestNeighbors
 from sklearn.decomposition import PCA
+
+import utils as u
+
 
 class Curvature:
     def __init__(self, data, k=15, pca_components=8):
@@ -83,3 +88,65 @@ class Curvature:
             return self.estimate_curvatures(curvature_type='both')
         else:
             raise ValueError("Invalid curvature_type. Choose 'PCA', 'gaussian', 'mean', or 'both'.")
+
+
+class Proximity:
+    def __init__(self, loader: DataLoader):
+        """Initialize with the data loader and compute class centroids."""
+        self.loader = loader
+        self.centroids = self.compute_centroids()
+
+    def compute_centroids(self):
+        """Compute the centroids for each class."""
+        centroids = {}
+        class_counts = {}
+
+        for data, targets in self.loader:
+            data, targets = data.to(u.DEVICE), targets.to(u.DEVICE)
+            unique_classes = torch.unique(targets)
+
+            for cls in unique_classes:
+                class_mask = (targets == cls)
+                class_data = data[class_mask]
+
+                if cls.item() not in centroids:
+                    centroids[cls.item()] = torch.zeros_like(class_data[0])
+                    class_counts[cls.item()] = 0
+
+                centroids[cls.item()] += class_data.sum(dim=0)
+                class_counts[cls.item()] += class_data.size(0)
+
+        # Finalize the centroids by dividing by the number of samples per class
+        for cls in centroids:
+            centroids[cls] /= class_counts[cls]
+
+        return centroids
+
+    def compute_proximity_ratios(self):
+        """Compute the proximity ratios for each sample in the dataset and return them as a flat list."""
+        proximity_ratios = []
+
+        for data, targets in self.loader:
+            data, targets = data.to(u.DEVICE), targets.to(u.DEVICE)
+
+            for sample, target in zip(data, targets):
+                same_class_centroid = self.centroids[target.item()]
+                min_other_class_dist = float('inf')
+
+                # Compute distance to the same class centroid
+                same_class_dist = torch.norm(sample - same_class_centroid).item()
+
+                # Compute the minimum distance to centroids of other classes
+                for cls, centroid in self.centroids.items():
+                    if cls != target.item():
+                        dist = torch.norm(sample - centroid).item()
+                        if dist < min_other_class_dist:
+                            min_other_class_dist = dist
+
+                # Compute the proximity ratio
+                proximity_ratio = min_other_class_dist / same_class_dist
+
+                # Append the proximity ratio to the flat list
+                proximity_ratios.append(proximity_ratio)
+
+        return proximity_ratios
