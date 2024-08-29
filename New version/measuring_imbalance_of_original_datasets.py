@@ -1,11 +1,10 @@
 import argparse
 from collections import defaultdict
 import os
-from typing import Any, Dict, List, Tuple
+from typing import List, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
-from prettytable import PrettyTable
 from scipy.stats import pearsonr
 import torch
 from torch.utils.data import DataLoader
@@ -19,122 +18,65 @@ np.random.seed(42)
 torch.manual_seed(42)
 if torch.cuda.is_available():
     torch.cuda.manual_seed_all(42)
-    
-    
-def identify_hard_samples(hardness_indicators: List[Tuple[float, float, int, float, float, float]],
-                          threshold: float) -> Dict[str, List[int]]:
+
+
+def extract_curvy_samples(curvature_values: List[float], threshold: float = 0.05):
     """
-    Identify the hardest samples in the dataset based on different metrics.
+    Extract the top 'threshold' percentage of samples with the highest curvature values.
 
-    :param hardness_indicators: List of tuples containing various hardness indicators (confidence, margin,
-                                misclassification, loss, gradient, entropy) for each sample.
-    :param threshold: Proportion of the hardest samples to consider (e.g., 0.05 for the top 5% of the hardest samples).
-    :return: A dictionary mapping each metric to a list of indices corresponding to the hardest samples.
+    :param curvature_values: List of curvature values for each sample.
+    :param threshold: The percentage of samples to consider (default: 0.05 for the top 5%).
+    :return: List of indices corresponding to the curviest samples.
     """
-    metrics = ['Confidence', 'Margin', 'Misclassification', 'Loss', 'Gradient', 'Entropy']
-    hard_sample_indices_for_different_metrics = {metric: [] for metric in metrics}
-    num_samples = len(hardness_indicators)
-    num_hard_samples = int(threshold * num_samples)
+    num_samples = len(curvature_values)
+    num_curvy_samples = int(threshold * num_samples)
 
-    confidence_sorted = sorted(enumerate(hardness_indicators), key=lambda x: x[1][0])[:num_hard_samples]
-    margin_sorted = sorted(enumerate(hardness_indicators), key=lambda x: x[1][1])[:num_hard_samples]
-    misclassified_sorted = sorted(enumerate(hardness_indicators), key=lambda x: x[1][2], reverse=True)[:num_hard_samples]
-    loss_sorted = sorted(enumerate(hardness_indicators), key=lambda x: x[1][3], reverse=True)[:num_hard_samples]
-    gradient_sorted = sorted(enumerate(hardness_indicators), key=lambda x: x[1][4], reverse=True)[:num_hard_samples]
-    entropy_sorted = sorted(enumerate(hardness_indicators), key=lambda x: x[1][5], reverse=True)[:num_hard_samples]
+    # Sort the samples by curvature in descending order and get the indices of the top 'threshold' percentage
+    sorted_indices = np.argsort(curvature_values)[::-1][:num_curvy_samples]
 
-    hard_sample_indices_for_different_metrics['Confidence'] = [idx for idx, _ in confidence_sorted]
-    hard_sample_indices_for_different_metrics['Margin'] = [idx for idx, _ in margin_sorted]
-    hard_sample_indices_for_different_metrics['Misclassification'] = [idx for idx, _ in misclassified_sorted]
-    hard_sample_indices_for_different_metrics['Loss'] = [idx for idx, _ in loss_sorted]
-    hard_sample_indices_for_different_metrics['Gradient'] = [idx for idx, _ in gradient_sorted]
-    hard_sample_indices_for_different_metrics['Entropy'] = [idx for idx, _ in entropy_sorted]
-
-    return hard_sample_indices_for_different_metrics
+    return sorted_indices
 
 
-def compute_hardness_distributions(hard_samples: Dict[str, List[int]],
-                                   labels: List[int]) -> Dict[str, defaultdict]:
+def compare_curvy_samples_to_class_accuracies(curvy_sample_indices,
+                                              labels: List[int],
+                                              avg_class_accuracies: np.ndarray,
+                                              num_classes: int):
     """
-    Compute the class-level distribution of the hardest samples based on different hardness metrics.
+    Compare the class-level distribution of the curvy samples to the class-level accuracies.
 
-    :param hard_samples: Dictionary containing the hardest samples for each metric.
+    :param curvy_sample_indices: List of indices corresponding to the curviest samples.
     :param labels: List of class labels corresponding to the samples.
-    :return: A dictionary mapping each metric to a class-level distribution of hard samples.
-    """
-    metrics = ['Confidence', 'Margin', 'Misclassification', 'Loss', 'Gradient', 'Entropy']
-    class_distributions = {metric: defaultdict(int) for metric in metrics}
-
-    for metric in metrics:
-        for idx in hard_samples[metric]:
-            class_label = labels[idx]
-            class_distributions[metric][class_label] += 1
-
-    return class_distributions
-
-
-def compute_hard_easy_ratios(hard_samples: Dict[str, List[int]], train_indices: List[int], test_indices: List[int]):
-    """
-    Compute and print the ratio of hard to easy samples in the training and test datasets.
-
-    :param hard_samples: Dictionary containing the hardest samples for each metric.
-    :param train_indices: List of indices corresponding to the training dataset.
-    :param test_indices: List of indices corresponding to the test dataset.
-    """
-    metrics = hard_samples.keys()
-    for metric in metrics:
-        hard_train = len([idx for idx in hard_samples[metric] if idx in train_indices])
-        hard_test = len([idx for idx in hard_samples[metric] if idx in test_indices])
-
-        easy_train = len(train_indices) - hard_train
-        easy_test = len(test_indices) - hard_test
-
-        print(f"Metric: {metric}")
-        print(f"Training dataset - Hard:Easy Ratio = {hard_train}:{easy_train}")
-        print(f"Test dataset - Hard:Easy Ratio = {hard_test}:{easy_test}")
-        print("-" * 40)
-
-
-
-def visualize_class_accuracies_and_hardness(avg_class_accuracies: np.ndarray, hardness_distributions: dict,
-                                            num_classes: int):
-    """
-    Visualize the class-level accuracies as a bar chart and overlay the hardness indicators as line plots.
-    Also, compute and display the Pearson correlation between class accuracies and hardness indicators.
-
     :param avg_class_accuracies: The average accuracies for each class.
-    :param hardness_distributions: A dictionary containing class-level hardness counts for each indicator.
     :param num_classes: The number of classes in the dataset.
     """
-    metrics = list(hardness_distributions.keys())
-    avg_class_errors = 1 - avg_class_accuracies
+    # Compute the class-level distribution of curvy samples
+    curvy_samples_distribution = defaultdict(int)
+    for idx in curvy_sample_indices:
+        class_label = labels[idx]
+        curvy_samples_distribution[class_label] += 1
 
-    # Plot class-level errors as a bar chart
+    # Convert the distribution to a list for easier comparison
+    curvy_samples_distribution_list = [curvy_samples_distribution[i] for i in range(num_classes)]
+
+    # Visualize the class-level distribution of curvy samples and compare it to class-level accuracies
     fig, ax1 = plt.subplots(figsize=(14, 8))
     bar_width = 0.35
     index = np.arange(num_classes)
-    ax1.bar(index, avg_class_errors, bar_width, label='Class Accuracy', color='lightcoral')
+    ax1.bar(index, avg_class_accuracies, bar_width, label='Class Accuracy', color='lightblue')
     ax1.set_xlabel('Class')
-    ax1.set_ylabel('Error Rate')
-    ax1.set_title('Class-Level Errors and Hardness Indicators')
+    ax1.set_ylabel('Accuracy')
+    ax1.set_title('Class-Level Accuracies and Curvy Sample Distribution')
 
-    # Create a second y-axis and plot the hardness indicators
     ax2 = ax1.twinx()
-    ax2.set_ylabel('Number of Hard Samples')
-    for metric in metrics:
-        ax2.plot(index, hardness_distributions[metric], label=metric, marker='o', linestyle='--')
-    ax2.legend(loc='upper right')
+    ax2.plot(index, curvy_samples_distribution_list, label='Curvy Sample Distribution', color='orange', marker='o')
+    ax2.set_ylabel('Number of Curvy Samples')
+
     fig.tight_layout()
     plt.show()
 
-    # Compute and display Pearson correlation coefficients
-    print("\nPearson Correlation Coefficients:")
-    correlation_table = PrettyTable()
-    correlation_table.field_names = ["Metric", "Pearson Correlation Coefficient"]
-    for metric in metrics:
-        correlation, _ = pearsonr(avg_class_errors, hardness_distributions[metric])
-        correlation_table.add_row([metric, f"{correlation:.4f}"])
-    print(correlation_table)
+    # Compute and display Pearson correlation coefficient
+    correlation, _ = pearsonr(1 - avg_class_accuracies, curvy_samples_distribution_list)
+    print(f"Pearson Correlation Coefficient between class errors and curvy sample distribution: {correlation:.4f}")
 
 
 def main(dataset_name: str, models_count: int, threshold: float):
@@ -146,7 +88,7 @@ def main(dataset_name: str, models_count: int, threshold: float):
     dataset = u.load_full_data_and_normalize(dataset_name)
     train_dataset, test_dataset = u.load_data_and_normalize(dataset_name)
     num_classes = len(np.unique(dataset.tensors[1].numpy()))
-    loader = DataLoader(dataset, batch_size=32, shuffle=True)
+    loader = DataLoader(dataset, batch_size=1000, shuffle=False)
     labels = dataset.tensors[1].numpy()
 
     # Check if the results are already cached
@@ -155,6 +97,9 @@ def main(dataset_name: str, models_count: int, threshold: float):
         avg_class_accuracies = np.load(accuracies_file)
         hardness_indicators = u.load_data(hardness_file)
     else:
+        curvature_values = compute_hardness_indicators(loader)
+        curvy_sample_indices = extract_curvy_samples(curvature_values, threshold=0.05)
+        loader.shuffle = True
         print("Running expensive operations (training and computing indicators)...")
         trainer = EnsembleTrainer(dataset_name, models_count)
         trainer.train_ensemble(loader)
@@ -164,21 +109,12 @@ def main(dataset_name: str, models_count: int, threshold: float):
         for model_idx, model in enumerate(trainer.get_trained_models()):
             class_accuracies[model_idx] = u.class_level_test(model, loader, num_classes)
         avg_class_accuracies = class_accuracies.mean(axis=0)
-
-        # Identify hard samples and measure their distribution among classes
-        loader.shuffle = False
-        hardness_indicators = compute_hardness_indicators(trainer.get_trained_models(), loader, models_count)
-
-        np.save(accuracies_file, avg_class_accuracies)
-        u.save_data(hardness_indicators, hardness_file)
+        compare_curvy_samples_to_class_accuracies(curvy_sample_indices, labels, avg_class_accuracies, num_classes)
     # Find the hardest and easiest classes, analyze hard sample distribution and visualize results
     hardest_class = np.argmin(avg_class_accuracies)
     easiest_class = np.argmax(avg_class_accuracies)
     print(f"Hardest class accuracy (class {hardest_class}): {avg_class_accuracies[hardest_class]:.2f}%")
     print(f"Easiest class accuracy (class {easiest_class}): {avg_class_accuracies[easiest_class]:.2f}%")
-    hard_samples = identify_hard_samples(hardness_indicators, threshold)
-    hardness_distributions = compute_hardness_distributions(hard_samples, labels)
-    visualize_class_accuracies_and_hardness(avg_class_accuracies, hardness_distributions, num_classes)
 
 
 if __name__ == '__main__':
