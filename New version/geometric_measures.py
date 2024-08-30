@@ -91,10 +91,12 @@ class Curvature:
 
 
 class Proximity:
-    def __init__(self, loader: DataLoader):
-        """Initialize with the data loader and compute class centroids."""
+    def __init__(self, loader: DataLoader, k: int = 5):
+        """Initialize with the data loader, compute class centroids, and set K for KNN."""
         self.loader = loader
+        self.k = k
         self.centroids = self.compute_centroids()
+        self.samples, self.labels = self.collect_samples()
 
     def compute_centroids(self):
         """Compute the centroids for each class."""
@@ -122,31 +124,69 @@ class Proximity:
 
         return centroids
 
-    def compute_proximity_ratios(self):
-        """Compute the proximity ratios for each sample in the dataset and return them as a flat list."""
-        proximity_ratios = []
-
+    def collect_samples(self):
+        """Collect all samples and their corresponding labels from the loader."""
+        samples = []
+        labels = []
         for data, targets in self.loader:
-            data, targets = data.to(u.DEVICE), targets.to(u.DEVICE)
+            samples.append(data.to(u.DEVICE))
+            labels.append(targets.to(u.DEVICE))
+        samples = torch.cat(samples)
+        labels = torch.cat(labels)
+        return samples, labels
 
-            for sample, target in zip(data, targets):
-                same_class_centroid = self.centroids[target.item()]
-                min_other_class_dist = float('inf')
+    def compute_proximity_ratios(self):
+        """Compute proximity metrics for each sample in the dataset."""
+        proximity_ratios = []
+        closest_other_class_distances = []
+        same_class_distances = []
+        sample_to_sample_ratios = []
+        knn_ratios = []
 
-                # Compute distance to the same class centroid
-                same_class_dist = torch.norm(sample - same_class_centroid).item()
+        # Prepare KNN classifier
+        # knn = NearestNeighbors(n_neighbors=self.k + 1)  # +1 to exclude the sample itself
+        # knn.fit(self.samples.cpu().numpy())
 
-                # Compute the minimum distance to centroids of other classes
-                for cls, centroid in self.centroids.items():
-                    if cls != target.item():
-                        dist = torch.norm(sample - centroid).item()
-                        if dist < min_other_class_dist:
-                            min_other_class_dist = dist
+        for sample, target in zip(self.samples, self.labels):
+            sample_np = sample.cpu().numpy()
+            same_class_centroid = self.centroids[target.item()]
+            min_other_class_dist = float('inf')
 
-                # Compute the proximity ratio
-                proximity_ratio = min_other_class_dist / same_class_dist
+            # Compute distance to the same class centroid
+            same_class_dist = torch.norm(sample - same_class_centroid).item()
 
-                # Append the proximity ratio to the flat list
-                proximity_ratios.append(proximity_ratio)
+            # Compute the minimum distance to centroids of other classes
+            for cls, centroid in self.centroids.items():
+                if cls != target.item():
+                    dist = torch.norm(sample - centroid).item()
+                    if dist < min_other_class_dist:
+                        min_other_class_dist = dist
 
-        return proximity_ratios
+            # Compute the proximity ratio
+            proximity_ratio = min_other_class_dist / same_class_dist
+            proximity_ratios.append(proximity_ratio)
+
+            # Store the distances to the closest centroid of a different class and the same class
+            closest_other_class_distances.append(min_other_class_dist)
+            same_class_distances.append(same_class_dist)
+
+            # Compute the KNN for this sample
+            # distances, indices = knn.kneighbors(sample_np.reshape(1, -1))
+            # distances = distances.flatten()
+            # indices = indices.flatten()
+
+            # Exclude the sample itself (index 0) from the KNN distances
+            # knn_distances = distances[1:]
+            # knn_labels = self.labels[indices[1:]].cpu().numpy()
+
+            # Compute the distance to the closest sample of the same class and different class
+            # min_same_class_dist = np.min(knn_distances[knn_labels == target.item()])
+            # min_diff_class_dist = np.min(knn_distances[knn_labels != target.item()])
+            # sample_to_sample_ratio = min_diff_class_dist / min_same_class_dist
+            # sample_to_sample_ratios.append(sample_to_sample_ratio)
+
+            # Compute the ratio of samples from the other class in the KNN
+            # knn_ratio = np.sum(knn_labels != target.item()) / self.k
+            # knn_ratios.append(knn_ratio)
+
+        return proximity_ratios, closest_other_class_distances, same_class_distances

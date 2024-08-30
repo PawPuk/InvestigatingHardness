@@ -20,8 +20,8 @@ if torch.cuda.is_available():
 def compute_hardness_indicators(loader: DataLoader):
     """Compute the geometric metrics of the data that can be used to identify hard samples, class-wise."""
     proximity = Proximity(loader)
-    proximity_ratios = proximity.compute_proximity_ratios()
-    return proximity_ratios
+    proximity_metrics = proximity.compute_proximity_ratios()
+    return proximity_metrics
 
 
 def main(dataset_name: str, models_count: int, long_tailed: bool, imbalance_ratio: float):
