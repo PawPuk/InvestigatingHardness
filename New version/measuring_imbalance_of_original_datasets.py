@@ -9,7 +9,7 @@ from scipy.stats import pearsonr
 import torch
 from torch.utils.data import DataLoader
 
-from compute_confidences import compute_curvatures, compute_proximity_metrics
+from compute_confidences import compute_curvatures, compute_disjuncts, compute_proximity_metrics
 from train_ensembles import EnsembleTrainer
 import utils as u
 
@@ -20,32 +20,41 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed_all(42)
 
 
-def extract_bottom_samples(metrics: List[List[float]], labels: List[int], threshold: float = 0.05):
+def extract_hard_samples(metrics: List[List[float]], labels: List[int], threshold: float = 0.05,
+                         invert: List[bool] = None):
     """
-    Extract the bottom 'threshold' percentage of samples with the smallest values for each metric.
+    Extract the 'threshold' percentage of the hardest samples for each metric.
 
     :param metrics: List of lists containing metrics (proximity and curvature) for all samples in the dataset.
     :param labels: List of class labels corresponding to the samples.
-    :param threshold: The percentage of samples to consider (default: 0.05 for the bottom 5%).
-    :return: A list of dictionaries, each containing class labels as keys and the count of bottom samples as values
+    :param threshold: The percentage of samples to consider (default: 0.05 for the hardest samples).
+    :param invert: List of booleans indicating whether to invert the selection (i.e., select highest instead of lowest)
+                   for each metric.
+    :return: A list of dictionaries, each containing class labels as keys and the count of hardest samples as values
     for each metric.
     """
     num_metrics = len(metrics)
     class_distributions = []
 
+    if invert is None:
+        invert = [False] * num_metrics
+
     for metric_idx in range(num_metrics):
         selected_metric = metrics[metric_idx]
         num_samples = len(selected_metric)
-        num_bottom_samples = int(threshold * num_samples)
+        num_hard_samples = int(threshold * num_samples)
 
-        # Sort the samples by the selected metric in ascending order and get the indices of the bottom 'threshold'
-        # percentage
-        sorted_indices = np.argsort(selected_metric)[:num_bottom_samples]
-        bottom_samples_indices = sorted_indices
+        # Sort the samples by the selected metric
+        if invert[metric_idx]:
+            sorted_indices = np.argsort(selected_metric)[-num_hard_samples:]  # Select top samples for harder metrics
+        else:
+            sorted_indices = np.argsort(selected_metric)[:num_hard_samples]  # Select bottom samples for easier metrics
 
-        # Compute the distribution of these bottom samples across different classes
+        hard_samples_indices = sorted_indices
+
+        # Compute the distribution of these hard samples across different classes
         class_distribution = defaultdict(int)
-        for idx in bottom_samples_indices:
+        for idx in hard_samples_indices:
             class_label = labels[idx]
             class_distribution[class_label] += 1
 
@@ -58,10 +67,10 @@ def compare_metrics_to_class_accuracies(class_distributions: List[Dict[int, int]
                                         avg_class_accuracies: np.ndarray,
                                         num_classes: int):
     """
-    Compare the class-level distribution of the bottom samples to the class-level accuracies
+    Compare the class-level distribution of the hardest samples to the class-level accuracies
     for each metric (both proximity and curvature).
 
-    :param class_distributions: List of dictionaries, each containing class labels as keys and the count of bottom
+    :param class_distributions: List of dictionaries, each containing class labels as keys and the count of hardest
     samples as values for each metric.
     :param avg_class_accuracies: The average accuracies for each class.
     :param num_classes: The number of classes in the dataset.
@@ -76,10 +85,10 @@ def compare_metrics_to_class_accuracies(class_distributions: List[Dict[int, int]
     ax1.bar(index, 1 - avg_class_accuracies, bar_width, label='Class Error Rate', color='lightblue')
     ax1.set_xlabel('Class')
     ax1.set_ylabel('Error Rate')
-    ax1.set_title('Class-Level Error Rates and Bottom Sample Distribution')
+    ax1.set_title('Class-Level Error Rates and Hard Sample Distribution')
 
     # Colors and labels for the different metrics
-    colors = ['orange', 'green', 'red', 'purple', 'brown', 'blue', 'cyan']
+    colors = ['orange', 'green', 'red', 'purple', 'brown', 'blue', 'cyan', 'magenta']
     metric_labels = [
         'Proximity Ratio (Centroids)',
         'Distance to Closest Other Class Centroid',
@@ -87,7 +96,8 @@ def compare_metrics_to_class_accuracies(class_distributions: List[Dict[int, int]
         'Sample-to-Sample Distance Ratio',
         'KNN Ratio',
         'Gaussian Curvature',
-        'Mean Curvature'
+        'Mean Curvature',
+        'Average KNN Curvature'
     ]
 
     ax2 = ax1.twinx()
@@ -108,7 +118,7 @@ def compare_metrics_to_class_accuracies(class_distributions: List[Dict[int, int]
         # Plot the normalized distribution
         ax2.plot(index, normalized_distribution, label=f'{metric_labels[i]}', color=colors[i], marker='o')
 
-    ax2.set_ylabel('Normalized Number of Bottom Samples')
+    ax2.set_ylabel('Normalized Number of Hard Samples')
     ax2.legend(loc='upper left', bbox_to_anchor=(0, 1), bbox_transform=ax1.transAxes)
 
     fig.tight_layout()
@@ -122,6 +132,7 @@ def main(dataset_name: str, models_count: int, threshold: float):
     accuracies_file = f"{u.HARD_IMBALANCE_DIR}{dataset_name}_avg_class_accuracies.npy"
     proximity_file = f"{u.HARD_IMBALANCE_DIR}{dataset_name}_proximity_indicators.pkl"
     curvatures_file = f"{u.HARD_IMBALANCE_DIR}{dataset_name}_curvature_indicators.pkl"
+    disjuncts_file = f"{u.HARD_IMBALANCE_DIR}{dataset_name}_disjuncts_indicators.pkl"
 
     # Load the dataset (full for proximity_indicators, and official training+test splits for ratio)
     dataset = u.load_full_data_and_normalize(dataset_name)
@@ -146,35 +157,52 @@ def main(dataset_name: str, models_count: int, threshold: float):
         avg_class_accuracies = class_accuracies.mean(axis=0)
         np.save(accuracies_file, avg_class_accuracies)
 
-    if os.path.exists(proximity_file):
-        print('Loading proximities.')
-        proximity_metrics = u.load_data(proximity_file)
-    else:
-        print('Calculating proximities.')
-        loader = DataLoader(dataset, batch_size=len(dataset), shuffle=False)
-        proximity_metrics = compute_proximity_metrics(loader, max_class_samples)
-        u.save_data(proximity_metrics, proximity_file)
-
+    loader = DataLoader(dataset, batch_size=len(dataset), shuffle=False)
     if os.path.exists(curvatures_file):
         print('Loading curvatures.')
         gaussian_curvatures, mean_curvatures = u.load_data(curvatures_file)
     else:
         print('Calculating curvatures.')
-        loader = DataLoader(dataset, batch_size=len(dataset), shuffle=False)
         gaussian_curvatures, mean_curvatures = compute_curvatures(loader)
         u.save_data((gaussian_curvatures, mean_curvatures), curvatures_file)
 
-    # Combine proximity metrics and curvature metrics (both Gaussian and mean)
-    all_metrics = proximity_metrics + (gaussian_curvatures, mean_curvatures)
+    if os.path.exists(proximity_file):
+        print('Loading proximities.')
+        proximity_metrics = u.load_data(proximity_file)
+    else:
+        print('Calculating proximities.')
+        proximity_metrics = compute_proximity_metrics(loader, max_class_samples, gaussian_curvatures)
+        u.save_data(proximity_metrics, proximity_file)
 
-    # Extract bottom 5% samples for each metric and compute their class distributions
-    class_distributions = extract_bottom_samples(all_metrics, labels, threshold=threshold)
+    if os.path.exists(disjuncts_file):
+        print('Loading disjuncts.')
+        disjunct_metrics = u.load_data(disjuncts_file)
+    else:
+        print('Calculating disjuncts.')
+        disjunct_metrics = compute_disjuncts(loader, max_class_samples)
+        u.save_data(disjunct_metrics, disjuncts_file)
 
-    # Display class distribution for bottom samples
-    for i, metric_distribution in enumerate(class_distributions):
-        print(f"\nClass distribution of bottom {threshold}% samples for metric {i}:")
-        for cls, count in metric_distribution.items():
-            print(f"Class {cls}: {count} samples")
+    gaussian_curvatures = [abs(gc) for gc in gaussian_curvatures]
+    # Combine proximity metrics, curvature metrics, and disjunct metrics
+    all_metrics = proximity_metrics + (gaussian_curvatures, mean_curvatures) + disjunct_metrics
+
+    # Define which metrics should be inverted (set True if higher values mean harder samples)
+    invert = [
+        False,  # Proximity Ratio (Centroids)
+        False,  # Distance to the Closest Other Class Centroid
+        True,   # Distance to the Same Class Centroid
+        False,  # Sample-to-Sample Distance Ratio
+        True,   # KNN Ratio
+        True,   # Gaussian Curvature
+        True,   # Mean Curvature
+        True,   # Average KNN Curvature
+        False,  # Disjunct Size Based on Custom Algorithm
+        False,  # Disjunct Size Based on GMM
+        False   # Disjunct Size Based on DBSCAN
+    ]
+
+    # Extract the hardest samples for each metric and compute their class distributions
+    class_distributions = extract_hard_samples(all_metrics, labels, threshold=threshold, invert=invert)
 
     # Find the hardest and easiest classes, analyze hard sample distribution and visualize results
     hardest_class = np.argmin(avg_class_accuracies)

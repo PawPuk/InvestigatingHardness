@@ -7,7 +7,7 @@ import torch
 from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 
-from geometric_measures import Curvature, Proximity
+from geometric_measures import Curvature, Disjuncts, Proximity
 from neural_networks import LeNet
 import utils as u
 
@@ -50,18 +50,26 @@ def compute_curvatures(loader: DataLoader, curvature_type='both'):
     for cls, class_loader in tqdm(class_loaders.items(), desc='Iterating through classes.'):
         for data, _ in class_loader:
             data.to(u.DEVICE)
-            gaussian_curvatures, mean_curvatures = Curvature(data).curvatures(curvature_type=curvature_type)
+            gaussian_curvatures, mean_curvatures = Curvature(data, k=25).curvatures(curvature_type=curvature_type)
             final_gaussian_curvatures.extend(gaussian_curvatures)
             final_mean_curvatures.extend(mean_curvatures)
 
     return final_gaussian_curvatures, final_mean_curvatures
 
 
-def compute_proximity_metrics(loader: DataLoader, max_class_samples: int):
+def compute_proximity_metrics(loader: DataLoader, max_class_samples: int, gaussian_curvatures: List[float]):
     """Compute the geometric metrics of the data that can be used to identify hard samples, class-wise."""
-    proximity = Proximity(loader, k=max_class_samples+1)
-    proximity_metrics = proximity.compute_proximity_ratios()
+    proximity = Proximity(loader, gaussian_curvatures, k=max_class_samples+1)
+    proximity_metrics = proximity.compute_proximity_metrics()
     return proximity_metrics
+
+
+def compute_disjuncts(loader: DataLoader, max_class_samples: int):
+    disjunct_metrics = []
+    disjuncts = Disjuncts(loader, k=max_class_samples+1)
+    for method in tqdm(['custom', 'gmm', 'dbscan'], desc='Computing disjuncts.'):
+        disjunct_metrics.append(disjuncts.compute_disjunct_statistics(method))
+    return tuple(disjunct_metrics)
 
 
 def main(dataset_name: str, models_count: int, long_tailed: bool, imbalance_ratio: float):
