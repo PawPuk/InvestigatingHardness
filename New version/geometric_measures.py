@@ -1,8 +1,10 @@
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from sklearn.neighbors import NearestNeighbors
 from sklearn.decomposition import PCA
+from tqdm import tqdm
 
 import utils as u
 
@@ -48,8 +50,7 @@ class Curvature:
 
         gaussian_curvatures = []
         mean_curvatures = []
-
-        for i, point_neighbors in enumerate(indices):
+        for i, point_neighbors in tqdm(enumerate(indices), desc='Iterating through samples'):
             point = self.data[i]
             neighbors = self.data[point_neighbors[1:]]  # Exclude the point itself
 
@@ -91,7 +92,7 @@ class Curvature:
 
 
 class Proximity:
-    def __init__(self, loader: DataLoader, k: int = 5):
+    def __init__(self, loader: DataLoader, k: int):
         """Initialize with the data loader, compute class centroids, and set K for KNN."""
         self.loader = loader
         self.k = k
@@ -144,11 +145,13 @@ class Proximity:
         knn_ratios = []
 
         # Prepare KNN classifier
-        # knn = NearestNeighbors(n_neighbors=self.k + 1)  # +1 to exclude the sample itself
-        # knn.fit(self.samples.cpu().numpy())
+        flattened_samples = self.samples.view(self.samples.size(0), -1).cpu().numpy()
+        knn = NearestNeighbors(n_neighbors=self.k + 1)  # +1 to exclude the sample itself
+        knn.fit(flattened_samples)
 
-        for sample, target in zip(self.samples, self.labels):
-            sample_np = sample.cpu().numpy()
+        for sample, target in tqdm(zip(self.samples, self.labels), desc='Computing sample-level proximity metrics.'):
+            # Flatten the sample for KNN
+            sample_np = sample.view(-1).cpu().numpy()
             same_class_centroid = self.centroids[target.item()]
             min_other_class_dist = float('inf')
 
@@ -171,22 +174,48 @@ class Proximity:
             same_class_distances.append(same_class_dist)
 
             # Compute the KNN for this sample
-            # distances, indices = knn.kneighbors(sample_np.reshape(1, -1))
-            # distances = distances.flatten()
-            # indices = indices.flatten()
+            distances, indices = knn.kneighbors(sample_np.reshape(1, -1))
+            distances = distances.flatten()
+            indices = indices.flatten()
 
             # Exclude the sample itself (index 0) from the KNN distances
-            # knn_distances = distances[1:]
-            # knn_labels = self.labels[indices[1:]].cpu().numpy()
+            knn_distances = distances[1:]
+            knn_labels = self.labels[indices[1:]].cpu().numpy()
 
-            # Compute the distance to the closest sample of the same class and different class
-            # min_same_class_dist = np.min(knn_distances[knn_labels == target.item()])
-            # min_diff_class_dist = np.min(knn_distances[knn_labels != target.item()])
-            # sample_to_sample_ratio = min_diff_class_dist / min_same_class_dist
-            # sample_to_sample_ratios.append(sample_to_sample_ratio)
+            # Check if there are no neighbors from different classes
+            if np.any(knn_labels != target.item()):
+                min_diff_class_dist = np.min(knn_distances[knn_labels != target.item()])
+                if len(knn_distances[knn_labels == target.item()]) == 0:
+                    print(knn_labels, target.item())
+                    print(knn_distances[knn_labels == target.item()])
+                    self.show_sample(sample, target)
+                    print(len(123))
+                sample_to_sample_ratio = min_diff_class_dist / np.min(knn_distances[knn_labels == target.item()])
+            else:
+                # Handle the case where there are no different-class neighbors within reasonable distance
+                sample_to_sample_ratio = np.inf
+
+            sample_to_sample_ratios.append(sample_to_sample_ratio)
 
             # Compute the ratio of samples from the other class in the KNN
-            # knn_ratio = np.sum(knn_labels != target.item()) / self.k
-            # knn_ratios.append(knn_ratio)
+            knn_ratio = np.sum(knn_labels != target.item()) / self.k
+            knn_ratios.append(knn_ratio)
 
-        return proximity_ratios, closest_other_class_distances, same_class_distances
+        return proximity_ratios, closest_other_class_distances, same_class_distances, sample_to_sample_ratios, \
+            knn_ratios
+
+    @staticmethod
+    def show_sample(sample, target):
+        """Display the sample, assuming it's an image."""
+        # Convert the sample to CPU and reshape for display
+        sample_np = sample.cpu().numpy()
+
+        # For grayscale images like MNIST
+        if sample_np.shape[0] == 1:
+            plt.imshow(sample_np.squeeze(), cmap='gray')
+        else:
+            # For RGB images like CIFAR10/CIFAR100
+            plt.imshow(np.transpose(sample_np, (1, 2, 0)))
+
+        plt.title(f"Label: {target.item()}")
+        plt.show()

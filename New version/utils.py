@@ -84,7 +84,7 @@ def load_full_data_and_normalize(dataset_name: str) -> TensorDataset:
     # Apply the calculated normalization to the subset
     normalize_transform = transforms.Normalize(mean=data_means, std=data_vars)
     normalized_subset_data = normalize_transform(full_data / 255.0)
-    return TensorDataset(normalized_subset_data, full_targets)
+    return TensorDataset(full_data, full_targets)
 
 
 def load_data_and_normalize(dataset_name: str, long_tailed: bool = False,

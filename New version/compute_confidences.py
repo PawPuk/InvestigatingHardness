@@ -4,7 +4,7 @@ from typing import List, Tuple, Any
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 
 from geometric_measures import Curvature, Proximity
@@ -17,9 +17,49 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed_all(42)
 
 
-def compute_hardness_indicators(loader: DataLoader):
+def divide_by_class(loader: DataLoader):
+    """Divide the data in the loader into separate loaders by class."""
+    class_indices = {}
+    dataset = loader.dataset
+    targets = dataset.tensors[1] if hasattr(dataset, 'tensors') else dataset.targets
+
+    # Group indices by class
+    for idx, target in enumerate(targets):
+        target = target.item()
+        if target not in class_indices:
+            class_indices[target] = []
+        class_indices[target].append(idx)
+
+    # Create DataLoaders for each class
+    class_loaders = {}
+    for cls, indices in class_indices.items():
+        class_loaders[cls] = DataLoader(Subset(dataset, indices), batch_size=len(indices), shuffle=False)
+        print(len(Subset(dataset, indices)))
+
+    return class_loaders
+
+
+def compute_curvatures(loader: DataLoader, curvature_type='both'):
+    """Compute curvatures for all samples in the loader."""
+    final_gaussian_curvatures = []
+    final_mean_curvatures = []
+
+    # Divide the loader by class
+    class_loaders = divide_by_class(loader)
+
+    for cls, class_loader in tqdm(class_loaders.items(), desc='Iterating through classes.'):
+        for data, _ in class_loader:
+            data.to(u.DEVICE)
+            gaussian_curvatures, mean_curvatures = Curvature(data).curvatures(curvature_type=curvature_type)
+            final_gaussian_curvatures.extend(gaussian_curvatures)
+            final_mean_curvatures.extend(mean_curvatures)
+
+    return final_gaussian_curvatures, final_mean_curvatures
+
+
+def compute_proximity_metrics(loader: DataLoader, max_class_samples: int):
     """Compute the geometric metrics of the data that can be used to identify hard samples, class-wise."""
-    proximity = Proximity(loader)
+    proximity = Proximity(loader, k=max_class_samples+1)
     proximity_metrics = proximity.compute_proximity_ratios()
     return proximity_metrics
 

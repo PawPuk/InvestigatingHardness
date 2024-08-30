@@ -9,7 +9,7 @@ from scipy.stats import pearsonr
 import torch
 from torch.utils.data import DataLoader
 
-from compute_confidences import compute_hardness_indicators
+from compute_confidences import compute_curvatures, compute_proximity_metrics
 from train_ensembles import EnsembleTrainer
 import utils as u
 
@@ -20,32 +20,32 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed_all(42)
 
 
-def extract_bottom_proximity_samples(proximity_metrics: List[List[float]], labels: List[int], threshold: float = 0.05):
+def extract_bottom_samples(metrics: List[List[float]], labels: List[int], threshold: float = 0.05):
     """
-    Extract the bottom 'threshold' percentage of samples with the smallest values for each proximity metric.
+    Extract the bottom 'threshold' percentage of samples with the smallest values for each metric.
 
-    :param proximity_metrics: List of lists containing proximity metrics for all samples in the dataset.
+    :param metrics: List of lists containing metrics (proximity and curvature) for all samples in the dataset.
     :param labels: List of class labels corresponding to the samples.
     :param threshold: The percentage of samples to consider (default: 0.05 for the bottom 5%).
     :return: A list of dictionaries, each containing class labels as keys and the count of bottom samples as values
     for each metric.
     """
-    num_metrics = len(proximity_metrics)
+    num_metrics = len(metrics)
     class_distributions = []
 
     for metric_idx in range(num_metrics):
-        selected_metric = proximity_metrics[metric_idx]
+        selected_metric = metrics[metric_idx]
         num_samples = len(selected_metric)
         num_bottom_samples = int(threshold * num_samples)
 
         # Sort the samples by the selected metric in ascending order and get the indices of the bottom 'threshold'
         # percentage
         sorted_indices = np.argsort(selected_metric)[:num_bottom_samples]
-        bottom_proximity_samples_indices = sorted_indices
+        bottom_samples_indices = sorted_indices
 
         # Compute the distribution of these bottom samples across different classes
         class_distribution = defaultdict(int)
-        for idx in bottom_proximity_samples_indices:
+        for idx in bottom_samples_indices:
             class_label = labels[idx]
             class_distribution[class_label] += 1
 
@@ -54,15 +54,15 @@ def extract_bottom_proximity_samples(proximity_metrics: List[List[float]], label
     return class_distributions
 
 
-def compare_top_proximity_samples_to_class_accuracies(class_distributions: List[Dict[int, int]],
-                                                      avg_class_accuracies: np.ndarray,
-                                                      num_classes: int):
+def compare_metrics_to_class_accuracies(class_distributions: List[Dict[int, int]],
+                                        avg_class_accuracies: np.ndarray,
+                                        num_classes: int):
     """
-    Compare the class-level distribution of the bottom proximity samples to the class-level accuracies
-    for each proximity metric.
+    Compare the class-level distribution of the bottom samples to the class-level accuracies
+    for each metric (both proximity and curvature).
 
     :param class_distributions: List of dictionaries, each containing class labels as keys and the count of bottom
-    proximity samples as values for each metric.
+    samples as values for each metric.
     :param avg_class_accuracies: The average accuracies for each class.
     :param num_classes: The number of classes in the dataset.
     """
@@ -76,32 +76,40 @@ def compare_top_proximity_samples_to_class_accuracies(class_distributions: List[
     ax1.bar(index, 1 - avg_class_accuracies, bar_width, label='Class Error Rate', color='lightblue')
     ax1.set_xlabel('Class')
     ax1.set_ylabel('Error Rate')
-    ax1.set_title('Class-Level Error Rates and Bottom Proximity Sample Distribution')
+    ax1.set_title('Class-Level Error Rates and Bottom Sample Distribution')
 
-    # Colors and labels for the different proximity metrics
-    colors = ['orange', 'green', 'red', 'purple', 'brown']
+    # Colors and labels for the different metrics
+    colors = ['orange', 'green', 'red', 'purple', 'brown', 'blue', 'cyan']
     metric_labels = [
         'Proximity Ratio (Centroids)',
         'Distance to Closest Other Class Centroid',
         'Distance to Same Class Centroid',
         'Sample-to-Sample Distance Ratio',
-        'KNN Ratio'
+        'KNN Ratio',
+        'Gaussian Curvature',
+        'Mean Curvature'
     ]
 
+    ax2 = ax1.twinx()
+
+    # Normalize and plot each metric
     for i, class_distribution in enumerate(class_distributions):
-        bottom_proximity_samples_distribution = [class_distribution.get(cls, 0) for cls in range(num_classes)]
+        bottom_samples_distribution = [class_distribution.get(cls, 0) for cls in range(num_classes)]
+
+        # Normalize the distribution to [0, 1]
+        normalized_distribution = (bottom_samples_distribution - np.min(bottom_samples_distribution)) / \
+                                  (np.max(bottom_samples_distribution) - np.min(bottom_samples_distribution))
 
         # Compute and display Pearson correlation coefficient
-        correlation, _ = pearsonr(1 - avg_class_accuracies, bottom_proximity_samples_distribution)
+        correlation, _ = pearsonr(1 - avg_class_accuracies, normalized_distribution)
         correlations.append(correlation)
         print(f"Pearson Correlation Coefficient for {metric_labels[i]}: {correlation:.4f}")
 
-        # Plot bottom proximity sample distribution
-        ax2 = ax1.twinx()
-        ax2.plot(index, bottom_proximity_samples_distribution, label=f'{metric_labels[i]}', color=colors[i], marker='o')
+        # Plot the normalized distribution
+        ax2.plot(index, normalized_distribution, label=f'{metric_labels[i]}', color=colors[i], marker='o')
 
-    ax2.set_ylabel('Number of Bottom Proximity Samples')
-    ax2.legend(loc='upper left')
+    ax2.set_ylabel('Normalized Number of Bottom Samples')
+    ax2.legend(loc='upper left', bbox_to_anchor=(0, 1), bbox_transform=ax1.transAxes)
 
     fig.tight_layout()
     plt.show()
@@ -113,11 +121,14 @@ def main(dataset_name: str, models_count: int, threshold: float):
     # Define file paths for saving and loading cached results
     accuracies_file = f"{u.HARD_IMBALANCE_DIR}{dataset_name}_avg_class_accuracies.npy"
     proximity_file = f"{u.HARD_IMBALANCE_DIR}{dataset_name}_proximity_indicators.pkl"
+    curvatures_file = f"{u.HARD_IMBALANCE_DIR}{dataset_name}_curvature_indicators.pkl"
 
     # Load the dataset (full for proximity_indicators, and official training+test splits for ratio)
     dataset = u.load_full_data_and_normalize(dataset_name)
     labels = dataset.tensors[1].numpy()
     num_classes = len(np.unique(labels))
+    class_sample_counts = np.bincount(labels)
+    max_class_samples = np.max(class_sample_counts)
 
     if os.path.exists(accuracies_file):
         print('Loading accuracies.')
@@ -141,15 +152,27 @@ def main(dataset_name: str, models_count: int, threshold: float):
     else:
         print('Calculating proximities.')
         loader = DataLoader(dataset, batch_size=len(dataset), shuffle=False)
-        proximity_metrics = compute_hardness_indicators(loader)
+        proximity_metrics = compute_proximity_metrics(loader, max_class_samples)
         u.save_data(proximity_metrics, proximity_file)
 
-    # Extract bottom 5% samples for each proximity metric and compute their class distributions
-    class_distributions = extract_bottom_proximity_samples(proximity_metrics, labels, threshold=threshold)
+    if os.path.exists(curvatures_file):
+        print('Loading curvatures.')
+        gaussian_curvatures, mean_curvatures = u.load_data(curvatures_file)
+    else:
+        print('Calculating curvatures.')
+        loader = DataLoader(dataset, batch_size=len(dataset), shuffle=False)
+        gaussian_curvatures, mean_curvatures = compute_curvatures(loader)
+        u.save_data((gaussian_curvatures, mean_curvatures), curvatures_file)
 
-    # Display class distribution for bottom proximity samples
+    # Combine proximity metrics and curvature metrics (both Gaussian and mean)
+    all_metrics = proximity_metrics + (gaussian_curvatures, mean_curvatures)
+
+    # Extract bottom 5% samples for each metric and compute their class distributions
+    class_distributions = extract_bottom_samples(all_metrics, labels, threshold=threshold)
+
+    # Display class distribution for bottom samples
     for i, metric_distribution in enumerate(class_distributions):
-        print(f"\nClass distribution of bottom 5% samples for metric {i}:")
+        print(f"\nClass distribution of bottom {threshold}% samples for metric {i}:")
         for cls, count in metric_distribution.items():
             print(f"Class {cls}: {count} samples")
 
@@ -160,8 +183,7 @@ def main(dataset_name: str, models_count: int, threshold: float):
     print(f"Easiest class accuracy (class {easiest_class}): {avg_class_accuracies[easiest_class]:.5f}%")
 
     # Compare and plot all metrics against class-level accuracies
-    compare_top_proximity_samples_to_class_accuracies(class_distributions, avg_class_accuracies,
-                                                                     num_classes)
+    compare_metrics_to_class_accuracies(class_distributions, avg_class_accuracies, num_classes)
 
 
 if __name__ == '__main__':
