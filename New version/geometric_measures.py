@@ -55,7 +55,7 @@ class Curvature:
 
         gaussian_curvatures = []
         mean_curvatures = []
-        for i, point_neighbors in tqdm(enumerate(indices), desc='Iterating through samples'):
+        for i, point_neighbors in enumerate(indices):
             point = self.data[i]
             neighbors = self.data[point_neighbors[1:]]  # Exclude the point itself
             pca = PCA(n_components=min(self.pca_components, self.data.shape[1]))  # Reduce to specified dimensions
@@ -283,13 +283,9 @@ class Disjuncts:
         flattened_samples = self.samples.view(self.samples.size(0), -1).cpu().numpy()
 
         # Perform KNN for each sample
-        print('a')
         knn = NearestNeighbors(n_neighbors=self.k + 1, n_jobs=-1)  # Use all available CPU cores
-        print('b')
         knn.fit(flattened_samples)
-        print('c')
         distances, indices = knn.kneighbors(flattened_samples)
-        print('d')
         # Compute the average distance to use as a threshold
         avg_distance = np.mean(distances[:, 1:])
 
@@ -307,10 +303,8 @@ class Disjuncts:
                 if is_connected and neighbor not in visited:
                     dfs(neighbor, cluster_id)
 
-        print('d')
         cluster_id = 0
         for i in range(len(flattened_samples)):
-            print('e')
             if i not in visited:
                 dfs(i, cluster_id)
                 cluster_id += 1
