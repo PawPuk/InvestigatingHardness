@@ -179,30 +179,16 @@ def main(dataset_name: str, models_count: int, threshold: float):
         disjunct_metrics = u.load_data(disjuncts_file)
     else:
         print('Calculating disjuncts.')
-        disjunct_metrics = compute_disjuncts(loader, max_class_samples)
+        disjunct_metrics = compute_disjuncts(loader, 10)
         u.save_data(disjunct_metrics, disjuncts_file)
 
     gaussian_curvatures = [abs(gc) for gc in gaussian_curvatures]
     # Combine proximity metrics, curvature metrics, and disjunct metrics
     all_metrics = proximity_metrics + (gaussian_curvatures, mean_curvatures) + disjunct_metrics
 
-    # Define which metrics should be inverted (set True if higher values mean harder samples)
-    invert = [
-        False,  # Proximity Ratio (Centroids)
-        False,  # Distance to the Closest Other Class Centroid
-        True,   # Distance to the Same Class Centroid
-        False,  # Sample-to-Sample Distance Ratio
-        True,   # KNN Ratio
-        True,   # Gaussian Curvature
-        True,   # Mean Curvature
-        True,   # Average KNN Curvature
-        False,  # Disjunct Size Based on Custom Algorithm
-        False,  # Disjunct Size Based on GMM
-        False   # Disjunct Size Based on DBSCAN
-    ]
-
     # Extract the hardest samples for each metric and compute their class distributions
-    class_distributions = extract_hard_samples(all_metrics, labels, threshold=threshold, invert=invert)
+    class_distributions_top = extract_hard_samples(all_metrics, labels, threshold=threshold, invert=[True] * 11)
+    class_distributions_bottom = extract_hard_samples(all_metrics, labels, threshold=threshold, invert=[False] * 11)
 
     # Find the hardest and easiest classes, analyze hard sample distribution and visualize results
     hardest_class = np.argmin(avg_class_accuracies)
@@ -211,7 +197,8 @@ def main(dataset_name: str, models_count: int, threshold: float):
     print(f"Easiest class accuracy (class {easiest_class}): {avg_class_accuracies[easiest_class]:.5f}%")
 
     # Compare and plot all metrics against class-level accuracies
-    compare_metrics_to_class_accuracies(class_distributions, avg_class_accuracies, num_classes)
+    compare_metrics_to_class_accuracies(class_distributions_top, avg_class_accuracies, num_classes)
+    compare_metrics_to_class_accuracies(class_distributions_bottom, avg_class_accuracies, num_classes)
 
 
 if __name__ == '__main__':

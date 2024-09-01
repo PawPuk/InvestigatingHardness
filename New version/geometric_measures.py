@@ -141,12 +141,25 @@ class Proximity:
 
     def compute_proximity_metrics(self):
         """Compute proximity metrics for each sample in the dataset, including KNN curvature."""
-        proximity_ratios = []
+        same_centroid_dists = []
+        other_centroid_dists = []
+        centroid_ratios = []
+
+        closest_same_class_distances = []
         closest_other_class_distances = []
-        same_class_distances = []
-        sample_to_sample_ratios = []
-        knn_ratios = []
-        knn_curvatures = []
+        closest_distance_ratios = []
+
+        avg_same_class_distances = []
+        avg_other_class_distances = []
+        avg_all_class_distances = []
+        avg_distance_ratios = []
+
+        percentage_same_class_knn = []
+        percentage_other_class_knn = []
+
+        avg_same_class_curvatures = []
+        avg_other_class_curvatures = []
+        avg_all_class_curvatures = []
 
         # Prepare KNN classifier
         flattened_samples = self.samples.view(self.samples.size(0), -1).cpu().numpy()
@@ -160,23 +173,17 @@ class Proximity:
             same_class_centroid = self.centroids[target.item()]
             min_other_class_dist = float('inf')
 
-            # Compute distance to the same class centroid
-            same_class_dist = torch.norm(sample - same_class_centroid).item()
-
-            # Compute the minimum distance to centroids of other classes
+            # Compute distance to the same/other (closest) class centroid + ratio
+            same_centroid_dist = torch.norm(sample - same_class_centroid).item()
             for cls, centroid in self.centroids.items():
                 if cls != target.item():
                     dist = torch.norm(sample - centroid).item()
                     if dist < min_other_class_dist:
                         min_other_class_dist = dist
-
-            # Compute the proximity ratio
-            proximity_ratio = min_other_class_dist / same_class_dist
-            proximity_ratios.append(proximity_ratio)
-
-            # Store the distances to the closest centroid of a different class and the same class
-            closest_other_class_distances.append(min_other_class_dist)
-            same_class_distances.append(same_class_dist)
+            centroid_ratio = min_other_class_dist / same_centroid_dist
+            centroid_ratios.append(centroid_ratio)
+            other_centroid_dists.append(min_other_class_dist)
+            same_centroid_dists.append(same_centroid_dist)
 
             # Compute the KNN for this sample
             distances, indices = knn.kneighbors(sample_np.reshape(1, -1))
@@ -187,42 +194,70 @@ class Proximity:
             knn_distances = distances[1:]
             knn_labels = self.labels[indices[1:]].cpu().numpy()
 
-            # Compute the average curvature of the K-nearest neighbors
-            knn_curvature = np.mean([self.curvatures[i] for i in indices[1:]])
-            knn_curvatures.append(knn_curvature)
-
-            # Check if there are no neighbors from different classes
-            if np.any(knn_labels != target.item()):
-                min_diff_class_dist = np.min(knn_distances[knn_labels != target.item()])
-                sample_to_sample_ratio = min_diff_class_dist / np.min(knn_distances[knn_labels == target.item()])
+            # Closest distances to the same and other class samples + ratio
+            if np.any(knn_labels == target.item()):
+                min_same_class_dist = np.min(knn_distances[knn_labels == target.item()])
             else:
-                # Handle the case where there are no different-class neighbors within reasonable distance
-                sample_to_sample_ratio = np.inf
+                min_same_class_dist = np.inf
 
-            sample_to_sample_ratios.append(sample_to_sample_ratio)
+            if np.any(knn_labels != target.item()):
+                min_other_class_dist = np.min(knn_distances[knn_labels != target.item()])
+            else:
+                min_other_class_dist = np.inf
 
-            # Compute the ratio of samples from the other class in the KNN
-            knn_ratio = np.sum(knn_labels != target.item()) / self.k
-            knn_ratios.append(knn_ratio)
+            closest_same_class_distances.append(min_same_class_dist)
+            closest_other_class_distances.append(min_other_class_dist)
+            closest_distance_ratios.append(min_same_class_dist / min_other_class_dist)
 
-        return proximity_ratios, closest_other_class_distances, same_class_distances, sample_to_sample_ratios, \
-            knn_ratios, knn_curvatures
+            # Average distances to same, other, and all samples in kNN
+            avg_same_dist = np.mean(knn_distances[knn_labels == target.item()]) if np.any(
+                knn_labels == target.item()) else np.inf
+            avg_other_dist = np.mean(knn_distances[knn_labels != target.item()]) if np.any(
+                knn_labels != target.item()) else np.inf
+            avg_all_dist = np.mean(knn_distances)
 
-    @staticmethod
-    def show_sample(sample, target):
-        """Display the sample, assuming it's an image."""
-        # Convert the sample to CPU and reshape for display
-        sample_np = sample.cpu().numpy()
+            avg_same_class_distances.append(avg_same_dist)
+            avg_other_class_distances.append(avg_other_dist)
+            avg_all_class_distances.append(avg_all_dist)
+            avg_distance_ratios.append(avg_same_dist / avg_other_dist)
 
-        # For grayscale images like MNIST
-        if sample_np.shape[0] == 1:
-            plt.imshow(sample_np.squeeze(), cmap='gray')
-        else:
-            # For RGB images like CIFAR10/CIFAR100
-            plt.imshow(np.transpose(sample_np, (1, 2, 0)))
+            # Compute the percentage of kNN samples from same and other classes
+            same_class_count = np.sum(knn_labels == target.item())
+            other_class_count = np.sum(knn_labels != target.item())
 
-        plt.title(f"Label: {target.item()}")
-        plt.show()
+            percentage_same_class_knn.append(same_class_count / self.k)
+            percentage_other_class_knn.append(other_class_count / self.k)
+
+            # Compute the average curvature of the K-nearest neighbors
+            knn_curvatures_all = [self.curvatures[i] for i in indices[1:]]
+            knn_curvatures_same = [self.curvatures[i] for i in indices[1:] if knn_labels[i - 1] == target.item()]
+            knn_curvatures_other = [self.curvatures[i] for i in indices[1:] if knn_labels[i - 1] != target.item()]
+
+            avg_all_curv = np.mean(knn_curvatures_all)
+            avg_same_curv = np.mean(knn_curvatures_same) if knn_curvatures_same else np.inf
+            avg_other_curv = np.mean(knn_curvatures_other) if knn_curvatures_other else np.array(0.0)
+
+            avg_all_class_curvatures.append(avg_all_curv)
+            avg_same_class_curvatures.append(avg_same_curv)
+            avg_other_class_curvatures.append(avg_other_curv)
+
+        return (
+            same_centroid_dists,
+            other_centroid_dists,
+            centroid_ratios,
+            closest_same_class_distances,
+            closest_other_class_distances,
+            closest_distance_ratios,
+            avg_same_class_distances,
+            avg_other_class_distances,
+            avg_all_class_distances,
+            avg_distance_ratios,
+            percentage_same_class_knn,
+            percentage_other_class_knn,
+            avg_same_class_curvatures,
+            avg_other_class_curvatures,
+            avg_all_class_curvatures
+        )
 
 
 class Disjuncts:
