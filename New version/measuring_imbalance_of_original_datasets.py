@@ -138,8 +138,6 @@ def main(dataset_name: str, models_count: int, threshold: float):
     dataset = u.load_full_data_and_normalize(dataset_name)
     labels = dataset.tensors[1].numpy()
     num_classes = len(np.unique(labels))
-    class_sample_counts = np.bincount(labels)
-    max_class_samples = np.max(class_sample_counts)
 
     if os.path.exists(accuracies_file):
         print('Loading accuracies.')
@@ -171,7 +169,7 @@ def main(dataset_name: str, models_count: int, threshold: float):
         proximity_metrics = u.load_data(proximity_file)
     else:
         print('Calculating proximities.')
-        proximity_metrics = compute_proximity_metrics(loader, max_class_samples, gaussian_curvatures)
+        proximity_metrics = compute_proximity_metrics(loader, gaussian_curvatures)
         u.save_data(proximity_metrics, proximity_file)
 
     if os.path.exists(disjuncts_file):

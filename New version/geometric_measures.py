@@ -1,7 +1,6 @@
 from collections import defaultdict
 from typing import List
 
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
@@ -36,7 +35,8 @@ class Curvature:
 
         return local_curvatures  # Return the list of local curvatures for each data point
 
-    def compute_hessian(self, coords):
+    @staticmethod
+    def compute_hessian(coords):
         n = coords.shape[1]
         G = np.dot(coords.T, coords)
         H = np.zeros((n, n))
@@ -163,7 +163,7 @@ class Proximity:
 
         # Prepare KNN classifier
         flattened_samples = self.samples.view(self.samples.size(0), -1).cpu().numpy()
-        knn = NearestNeighbors(n_neighbors=self.k + 1)  # +1 to exclude the sample itself
+        knn = NearestNeighbors(n_neighbors=self.k)
         knn.fit(flattened_samples)
 
         for idx, (sample, target) in tqdm(enumerate(zip(self.samples, self.labels)),
@@ -285,7 +285,7 @@ class Disjuncts:
         # Perform KNN for each sample
         knn = NearestNeighbors(n_neighbors=self.k + 1, n_jobs=-1)  # Use all available CPU cores
         knn.fit(flattened_samples)
-        distances, indices = knn.kneighbors(flattened_samples)
+        distances, _ = knn.kneighbors(flattened_samples)
         # Compute the average distance to use as a threshold
         avg_distance = np.mean(distances[:, 1:])
 

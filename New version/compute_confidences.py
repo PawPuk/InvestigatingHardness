@@ -41,25 +41,36 @@ def divide_by_class(loader: DataLoader):
 
 def compute_curvatures(loader: DataLoader, curvature_type='both'):
     """Compute curvatures for all samples in the loader."""
-    final_gaussian_curvatures = []
-    final_mean_curvatures = []
+    # Determine the total number of samples in the dataset
+    total_samples = sum(len(data) for data, _ in loader)
+
+    # Initialize final curvature lists with None values to ensure correct indexing
+    final_gaussian_curvatures = [None] * total_samples
+    final_mean_curvatures = [None] * total_samples
 
     # Divide the loader by class
     class_loaders = divide_by_class(loader)
 
+    # Maintain a running index for placing curvatures correctly
+    current_index = 0
+
     for cls, class_loader in tqdm(class_loaders.items(), desc='Iterating through classes.'):
         for data, _ in class_loader:
             data.to(u.DEVICE)
-            gaussian_curvatures, mean_curvatures = Curvature(data, k=25).curvatures(curvature_type=curvature_type)
-            final_gaussian_curvatures.extend(gaussian_curvatures)
-            final_mean_curvatures.extend(mean_curvatures)
+            gaussian_curvatures, mean_curvatures = Curvature(data, k=10).curvatures(curvature_type=curvature_type)
+
+            # Place curvatures at the correct positions in the final lists
+            for i in range(len(data)):
+                final_gaussian_curvatures[current_index] = gaussian_curvatures[i]
+                final_mean_curvatures[current_index] = mean_curvatures[i]
+                current_index += 1
 
     return final_gaussian_curvatures, final_mean_curvatures
 
 
-def compute_proximity_metrics(loader: DataLoader, max_class_samples: int, gaussian_curvatures: List[float]):
+def compute_proximity_metrics(loader: DataLoader, gaussian_curvatures: List[float]):
     """Compute the geometric metrics of the data that can be used to identify hard samples, class-wise."""
-    proximity = Proximity(loader, gaussian_curvatures, k=max_class_samples+1)
+    proximity = Proximity(loader, gaussian_curvatures, k=20)
     proximity_metrics = proximity.compute_proximity_metrics()
     return proximity_metrics
 
