@@ -36,36 +36,27 @@ def divide_by_class(loader: DataLoader):
         class_loaders[cls] = DataLoader(Subset(dataset, indices), batch_size=len(indices), shuffle=False)
         print(len(Subset(dataset, indices)))
 
-    return class_loaders
+    return class_loaders, class_indices
 
 
-def compute_curvatures(loader: DataLoader, curvature_type='both'):
+def compute_curvatures(loader: DataLoader):
     """Compute curvatures for all samples in the loader."""
     # Determine the total number of samples in the dataset
     total_samples = sum(len(data) for data, _ in loader)
 
     # Initialize final curvature lists with None values to ensure correct indexing
-    final_gaussian_curvatures = [None] * total_samples
-    final_mean_curvatures = [None] * total_samples
+    gaussian_curvatures = [None] * total_samples
+    mean_curvatures = [None] * total_samples
 
     # Divide the loader by class
-    class_loaders = divide_by_class(loader)
-
-    # Maintain a running index for placing curvatures correctly
-    current_index = 0
+    class_loaders, class_indices = divide_by_class(loader)
 
     for cls, class_loader in tqdm(class_loaders.items(), desc='Iterating through classes.'):
         for data, _ in class_loader:
             data.to(u.DEVICE)
-            gaussian_curvatures, mean_curvatures = Curvature(data, k=10).curvatures(curvature_type=curvature_type)
+            Curvature(data, class_indices[cls], k=10).estimate_curvatures(gaussian_curvatures, mean_curvatures)
 
-            # Place curvatures at the correct positions in the final lists
-            for i in range(len(data)):
-                final_gaussian_curvatures[current_index] = gaussian_curvatures[i]
-                final_mean_curvatures[current_index] = mean_curvatures[i]
-                current_index += 1
-
-    return final_gaussian_curvatures, final_mean_curvatures
+    return gaussian_curvatures, mean_curvatures
 
 
 def compute_proximity_metrics(loader: DataLoader, gaussian_curvatures: List[float]):
@@ -75,15 +66,20 @@ def compute_proximity_metrics(loader: DataLoader, gaussian_curvatures: List[floa
     return proximity_metrics
 
 
-def compute_disjuncts(loader: DataLoader, max_class_samples: int):
-    disjunct_metrics = []
-    disjuncts = Disjuncts(loader, k=max_class_samples+1)
-    for method in tqdm(['custom', 'gmm', 'dbscan'], desc='Computing disjuncts.'):
-        disjunct_metrics.append(disjuncts.compute_disjunct_statistics(method))
+def compute_disjuncts(loader: DataLoader):
+    total_samples = sum(len(data) for data, _ in loader)
+    disjunct_metrics = [[None] * total_samples, [None] * total_samples, [None] * total_samples]
+    class_loaders, class_indices = divide_by_class(loader)
+    for cls, class_loader in tqdm(class_loaders.items(), desc='Iterating through classes.'):
+        for data, _ in class_loader:
+            data.to(u.DEVICE)
+            for i, method in tqdm(enumerate(['custom', 'gmm', 'dbscan']), desc='Computing disjuncts.'):
+                Disjuncts(data, class_indices).compute_disjunct_statistics(method, disjunct_metrics[i])
+
     return tuple(disjunct_metrics)
 
 
-def main(dataset_name: str, models_count: int, long_tailed: bool, imbalance_ratio: float):
+"""def main(dataset_name: str, models_count: int, long_tailed: bool, imbalance_ratio: float):
     train_dataset, _ = u.load_data_and_normalize(dataset_name, long_tailed, imbalance_ratio)
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=False)
     models = []
@@ -112,4 +108,4 @@ if __name__ == '__main__':
     parser.add_argument('--imbalance_ratio', type=float, default=1.0,
                         help='Imbalance ratio for long-tailed dataset.')
     args = parser.parse_args()
-    main(**vars(args))
+    main(**vars(args))"""

@@ -14,26 +14,11 @@ import utils as u
 
 
 class Curvature:
-    def __init__(self, data, k=15, pca_components=8):
-        # Assuming data is a batch of images, we flatten each image into a 1D vector
-        self.data = data.reshape(data.shape[0], -1)  # Flatten the images
+    def __init__(self, data, data_indices, k=15, pca_components=8):
+        self.data = data.reshape(data.shape[0], -1)  # Flatten the images (required for image datasets)
+        self.data_indices = data_indices
         self.k = k
         self.pca_components = pca_components
-
-    def quantify_local_concavity(self):
-        nn = NearestNeighbors(n_neighbors=self.k + 1)
-        nn.fit(self.data)
-        distances, indices = nn.kneighbors(self.data)
-
-        local_curvatures = []
-        for i, point_neighbors in enumerate(indices):
-            neighbor_points = self.data[point_neighbors]
-            local_cov_matrix = np.cov(neighbor_points[:, 1:].T)
-            eigenvalues = np.linalg.eigvals(local_cov_matrix)
-            curvature = np.mean(eigenvalues)
-            local_curvatures.append(curvature)
-
-        return local_curvatures  # Return the list of local curvatures for each data point
 
     @staticmethod
     def compute_hessian(coords):
@@ -48,13 +33,11 @@ class Curvature:
                     H[i, j] = np.mean((G[:, i] - np.mean(G[:, i])) * (G[:, j] - np.mean(G[:, j])))
         return H
 
-    def estimate_curvatures(self, curvature_type='both'):
-        nn = NearestNeighbors(n_neighbors=self.k + 1)
+    def estimate_curvatures(self, gaussian_curvatures, mean_curvatures):
+        nn = NearestNeighbors(n_neighbors=self.k)
         nn.fit(self.data)
         distances, indices = nn.kneighbors(self.data)
 
-        gaussian_curvatures = []
-        mean_curvatures = []
         for i, point_neighbors in enumerate(indices):
             point = self.data[i]
             neighbors = self.data[point_neighbors[1:]]  # Exclude the point itself
@@ -67,30 +50,12 @@ class Curvature:
                 k1, k2 = eigenvalues[:2]
                 gaussian_curvature = k1 * k2  # Gaussian curvature is the product of the principal curvatures
                 mean_curvature = (k1 + k2) / 2  # Mean curvature is the average of the principal curvatures
-                gaussian_curvatures.append(gaussian_curvature)
-                mean_curvatures.append(mean_curvature)
-            del point, neighbors, pca, coords, H, eigenvalues, gaussian_curvature, mean_curvature
-
-        if curvature_type == 'gaussian':
-            return gaussian_curvatures  # Return list of Gaussian curvatures for each point
-        elif curvature_type == 'mean':
-            return np.abs(mean_curvatures)  # Return list of mean curvatures for each point
-        elif curvature_type == 'both':
-            return gaussian_curvatures, np.abs(mean_curvatures)  # Return both curvatures for each point
-        else:
-            raise ValueError("Invalid curvature_type. Choose 'gaussian', 'mean', or 'both'.")
-
-    def curvatures(self, curvature_type='PCA'):
-        if curvature_type == 'PCA':
-            return self.quantify_local_concavity()  # Return local concavities for each data point
-        elif curvature_type == 'gaussian':
-            return self.estimate_curvatures(curvature_type='gaussian')
-        elif curvature_type == 'mean':
-            return self.estimate_curvatures(curvature_type='mean')
-        elif curvature_type == 'both':
-            return self.estimate_curvatures(curvature_type='both')
-        else:
-            raise ValueError("Invalid curvature_type. Choose 'PCA', 'gaussian', 'mean', or 'both'.")
+                if gaussian_curvatures[self.data_indices[i]] is not None:
+                    raise Exception
+                if mean_curvatures[self.data_indices[i]] is not None:
+                    raise Exception
+                gaussian_curvatures[self.data_indices[i]] = gaussian_curvature
+                mean_curvatures[self.data_indices[i]] = mean_curvature
 
 
 class Proximity:
@@ -180,7 +145,7 @@ class Proximity:
                     dist = torch.norm(sample - centroid).item()
                     if dist < min_other_class_dist:
                         min_other_class_dist = dist
-            centroid_ratio = min_other_class_dist / same_centroid_dist
+            centroid_ratio = same_centroid_dist / min_other_class_dist
             centroid_ratios.append(centroid_ratio)
             other_centroid_dists.append(min_other_class_dist)
             same_centroid_dists.append(same_centroid_dist)
@@ -230,8 +195,8 @@ class Proximity:
 
             # Compute the average curvature of the K-nearest neighbors
             knn_curvatures_all = [self.curvatures[i] for i in indices[1:]]
-            knn_curvatures_same = [self.curvatures[i] for i in indices[1:] if knn_labels[i - 1] == target.item()]
-            knn_curvatures_other = [self.curvatures[i] for i in indices[1:] if knn_labels[i - 1] != target.item()]
+            knn_curvatures_same = [self.curvatures[i] for i in indices[1:] if self.labels[i - 1] == target.item()]
+            knn_curvatures_other = [self.curvatures[i] for i in indices[1:] if self.labels[i - 1] != target.item()]
 
             avg_all_curv = np.mean(knn_curvatures_all)
             avg_same_curv = np.mean(knn_curvatures_same) if knn_curvatures_same else np.inf
@@ -261,31 +226,17 @@ class Proximity:
 
 
 class Disjuncts:
-    def __init__(self, loader: DataLoader, k: int):
+    def __init__(self, data, data_indices):
         """Initialize with the data loader and K for custom clustering method."""
-        self.loader = loader
-        self.k = k
-        self.samples, self.labels = self.collect_samples()
+        self.data = data.reshape(data.shape[0], -1).cpu().numpy()  # Flatten the images (required for image datasets)
+        self.data_indices = data_indices
 
-    def collect_samples(self):
-        """Collect all samples and their corresponding labels from the loader."""
-        samples = []
-        labels = []
-        for data, targets in self.loader:
-            samples.append(data.to(u.DEVICE))
-            labels.append(targets.to(u.DEVICE))
-        samples = torch.cat(samples)
-        labels = torch.cat(labels)
-        return samples, labels
-
-    def custom_clustering(self):
+    def custom_clustering(self, disjunct_metrics):
         """Custom clustering based on path-based method with KNN."""
-        flattened_samples = self.samples.view(self.samples.size(0), -1).cpu().numpy()
-
         # Perform KNN for each sample
-        knn = NearestNeighbors(n_neighbors=self.k + 1, n_jobs=-1)  # Use all available CPU cores
-        knn.fit(flattened_samples)
-        distances, _ = knn.kneighbors(flattened_samples)
+        knn = NearestNeighbors(n_neighbors=len(self.data), n_jobs=-1)  # Use all available CPU cores
+        knn.fit(self.data)
+        distances, _ = knn.kneighbors(self.data)
         # Compute the average distance to use as a threshold
         avg_distance = np.mean(distances[:, 1:])
 
@@ -303,63 +254,64 @@ class Disjuncts:
                 if is_connected and neighbor not in visited:
                     dfs(neighbor, cluster_id)
 
+        # A dataset belongs to a cluster if it's within dist < avg_distance of any other sample from the cluster
         cluster_id = 0
-        for i in range(len(flattened_samples)):
+        for i in range(len(self.data)):
             if i not in visited:
                 dfs(i, cluster_id)
                 cluster_id += 1
 
         # Compute the size of the cluster for each sample
         cluster_sizes = [len(clusters[cluster_id]) for cluster_id in clusters]
-        disjunct_statistics = [cluster_sizes[cluster_id] for i in range(len(flattened_samples))]
+        for i in range(len(cluster_sizes)):
+            for node in clusters[i]:
+                if disjunct_metrics[self.data_indices[node]] is not None:
+                    raise Exception
+                disjunct_metrics[self.data_indices[node]] = cluster_sizes[i]
 
-        return disjunct_statistics
-
-    def gmm_clustering(self, n_components: int):
+    def gmm_clustering(self, disjunct_metrics: List[None], n_components: int):
         """GMM-based clustering."""
-        flattened_samples = self.samples.view(self.samples.size(0), -1).cpu().numpy()
 
         gmm = GaussianMixture(n_components=n_components, covariance_type='full')
-        gmm.fit(flattened_samples)
-        cluster_labels = gmm.predict(flattened_samples)
+        gmm.fit(self.data)
+        cluster_labels = gmm.predict(self.data)
 
         # Compute the size of the cluster for each sample
         cluster_sizes = np.bincount(cluster_labels)
-        disjunct_statistics = [cluster_sizes[label] for label in cluster_labels]
+        for i in range(len(self.data)):
+            if disjunct_metrics[self.data_indices[i]] is not None:
+                raise Exception
+            disjunct_metrics[self.data_indices[i]] = cluster_sizes[cluster_labels[i]]
 
-        return disjunct_statistics
-
-    def dbscan_clustering(self, eps: float, min_samples: int):
+    def dbscan_clustering(self, disjunct_metrics: List[None], eps: float, min_samples: int):
         """DBSCAN-based clustering."""
-        flattened_samples = self.samples.view(self.samples.size(0), -1).cpu().numpy()
-
         dbscan = DBSCAN(eps=eps, min_samples=min_samples)
-        cluster_labels = dbscan.fit_predict(flattened_samples)
+        cluster_labels = dbscan.fit_predict(self.data)
 
-        # Compute the size of the cluster for each sample, ignoring noise (-1)
-        unique_labels = set(cluster_labels)
-        unique_labels.discard(-1)
-        cluster_sizes = {label: sum(cluster_labels == label) for label in unique_labels}
-        disjunct_statistics = [cluster_sizes.get(label, 0) for label in cluster_labels]
+        # Compute the size of the cluster for each sample
+        cluster_sizes = np.bincount(cluster_labels)
+        for i in range(len(self.data)):
+            if disjunct_metrics[self.data_indices[i]] is not None:
+                raise Exception
+            disjunct_metrics[self.data_indices[i]] = cluster_sizes[cluster_labels[i]]
 
-        return disjunct_statistics
-
-    def compute_disjunct_statistics(self, method: str = 'custom', **kwargs):
+    def compute_disjunct_statistics(self, method: str, disjunct_metrics: List[None], **kwargs):
         """
         Compute disjunct statistics based on the specified method.
 
         :param method: The method to use ('custom', 'gmm', 'dbscan').
+        :param disjunct_metrics: A list that will be populated with the disjunct metrics
         :param kwargs: Additional parameters for the clustering method.
         :return: List of disjunct statistics for each sample.
         """
         if method == 'custom':
-            return self.custom_clustering()
+            return self.custom_clustering(disjunct_metrics)
         elif method == 'gmm':
             n_components = kwargs.get('n_components', 10)  # Default to 10 components for GMM
-            return self.gmm_clustering(n_components)
+            return self.gmm_clustering(disjunct_metrics, n_components)
         elif method == 'dbscan':
             eps = kwargs.get('eps', 0.5)  # Default epsilon for DBSCAN
             min_samples = kwargs.get('min_samples', 5)  # Default minimum samples for DBSCAN
-            return self.dbscan_clustering(eps, min_samples)
+            return self.dbscan_clustering(disjunct_metrics, eps, min_samples)
         else:
             raise ValueError("Invalid method. Choose 'custom', 'gmm', or 'dbscan'.")

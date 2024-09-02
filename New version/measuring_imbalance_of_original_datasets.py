@@ -177,7 +177,7 @@ def main(dataset_name: str, models_count: int, threshold: float):
         disjunct_metrics = u.load_data(disjuncts_file)
     else:
         print('Calculating disjuncts.')
-        disjunct_metrics = compute_disjuncts(loader, 10)
+        disjunct_metrics = compute_disjuncts(loader)
         u.save_data(disjunct_metrics, disjuncts_file)
 
     gaussian_curvatures = [abs(gc) for gc in gaussian_curvatures]
