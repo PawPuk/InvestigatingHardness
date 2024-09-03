@@ -21,7 +21,7 @@ if torch.cuda.is_available():
 
 
 def extract_hard_samples(metrics: List[List[float]], labels: List[int], invert: List[bool], dataset_name: str,
-                         threshold: float = 0.05) -> Dict:
+                         threshold: float = 0.05) -> List[Dict[int, int]]:
     """
     Extract the 'threshold' percentage of the hardest samples for each metric and compute the average of each metric
     for every class.
@@ -40,7 +40,6 @@ def extract_hard_samples(metrics: List[List[float]], labels: List[int], invert: 
     """
     num_metrics = len(metrics)
     class_distributions = []
-    class_averages = []
 
     for metric_idx in range(num_metrics):
         selected_metric = metrics[metric_idx]
@@ -60,15 +59,6 @@ def extract_hard_samples(metrics: List[List[float]], labels: List[int], invert: 
             class_distribution[class_label] += 1
         class_distributions.append(class_distribution)
 
-        # Compute the average of each metric for every class
-        class_average = defaultdict(list)
-        for metric_value, label in zip(selected_metric, labels):
-            class_average[label].append(metric_value)
-        # Compute the mean of each class
-        for class_label, values in class_average.items():
-            class_average[class_label] = list(np.mean(values))
-        class_averages.append(class_average)
-
         # Plot and save sorted metric values
         plt.figure(figsize=(10, 6))
         sorted_metric = sorted(selected_metric)
@@ -84,16 +74,10 @@ def extract_hard_samples(metrics: List[List[float]], labels: List[int], invert: 
         plt.savefig(os.path.join(output_dir, f'{dataset_name}metric_{metric_idx + 1}_distribution.pdf'))
         plt.close()
 
-    return {
-        'class_distributions': class_distributions,
-        'class_averages': class_averages
-    }
+    return class_distributions
 
 
-def compare_metrics_to_class_accuracies(class_distributions: List[Dict[int, int]],
-                                        avg_class_accuracies: np.ndarray,
-                                        num_classes: int,
-                                        output_filename: str):
+def compare_metrics_to_class_accuracies(class_distributions, avg_class_accuracies, num_classes, output_filename):
     """
     Compare the class-level distribution of hard samples to the class-level accuracies
     for each metric by computing Pearson Correlation Coefficient (PCC) and plotting the results.
@@ -110,11 +94,11 @@ def compare_metrics_to_class_accuracies(class_distributions: List[Dict[int, int]
         'SCD', 'OCD', 'CR', 'CSC', 'COC', 'CDR',
         'ASD', 'AOD', 'AAD', 'ADR', 'PSK',
         'POK', 'ASC', 'AOC', 'AAC', 'GC',
-        'MC', 'CCS', 'GCS', 'DCS'
+        'MC'
     ]  # Abbreviations for each metric to keep plot readable.
 
     # Compute PCC for each metric
-    for i, class_distribution in enumerate(class_distributions):
+    for class_distribution in class_distributions:
         class_level_distribution = [class_distribution.get(cls, 0) for cls in range(num_classes)]
 
         # Normalize the distribution to [0, 1]
@@ -125,12 +109,40 @@ def compare_metrics_to_class_accuracies(class_distributions: List[Dict[int, int]
         correlation, _ = pearsonr(avg_class_accuracies, normalized_distribution)
         correlations.append(correlation)
 
-    # Plot PCCs in a bar chart
+    # Define colors based on correlation strength
+    def get_color(pcc):
+        abs_pcc = abs(pcc)
+        if abs_pcc < 0.2:
+            return 'lightgray'  # very weak
+        elif abs_pcc < 0.4:
+            return 'lightblue'  # weak
+        elif abs_pcc < 0.6:
+            return 'skyblue'  # moderate
+        elif abs_pcc < 0.8:
+            return 'dodgerblue'  # strong
+        else:
+            return 'blue'  # very strong
+
+    colors = [get_color(corr) for corr in correlations]
+
+    # Plot PCCs in a bar chart with horizontal lines
     plt.figure(figsize=(14, 8))
-    plt.bar(metric_abbreviations, correlations, color='skyblue')
-    plt.ylabel('Pearson Correlation Coefficient (PCC)')
+    plt.bar(metric_abbreviations, correlations, color=colors)
     plt.title('PCC Between Metrics and Class-Level Accuracies')
+    plt.ylabel('Pearson Correlation Coefficient (PCC)')
     plt.xticks(rotation=45, ha='right')
+
+    # Add horizontal lines for better readability
+    plt.axhline(0, color='black', linewidth=0.5)
+    plt.axhline(0.2, color='gray', linestyle='--', linewidth=0.5)
+    plt.axhline(-0.2, color='gray', linestyle='--', linewidth=0.5)
+    plt.axhline(0.4, color='gray', linestyle='--', linewidth=0.5)
+    plt.axhline(-0.4, color='gray', linestyle='--', linewidth=0.5)
+    plt.axhline(0.6, color='gray', linestyle='--', linewidth=0.5)
+    plt.axhline(-0.6, color='gray', linestyle='--', linewidth=0.5)
+    plt.axhline(0.8, color='gray', linestyle='--', linewidth=0.5)
+    plt.axhline(-0.8, color='gray', linestyle='--', linewidth=0.5)
+
     plt.tight_layout()
 
     # Ensure the output directory exists
@@ -139,7 +151,38 @@ def compare_metrics_to_class_accuracies(class_distributions: List[Dict[int, int]
     plt.savefig(os.path.join(output_dir, output_filename))
     plt.close()
 
-    return correlations
+
+def compute_class_averages_of_metrics(metrics, labels):
+    class_averages = []
+
+    for metric in metrics:
+        # Handle inf values: replace them with the second largest value
+        metric = np.array(metric)
+        if np.isinf(metric).any():
+            finite_vals = metric[np.isfinite(metric)]
+            if len(finite_vals) > 0:
+                second_largest = np.partition(finite_vals, -2)[-2]  # Get second largest finite value
+                metric[np.isinf(metric)] = second_largest
+
+        # Normalize by dividing by the maximum value in the metric
+        max_val = np.max(metric)
+        if max_val != 0:
+            metric = metric / max_val
+        else:
+            raise Exception('This should not happen.')
+
+        # Compute the average of each normalized metric for every class
+        class_average = defaultdict(list)
+        for metric_value, label in zip(metric, labels):
+            class_average[label].append(metric_value)
+
+        # Compute the mean of each class
+        for class_label, values in class_average.items():
+            class_average[class_label] = np.mean(values)
+
+        class_averages.append(class_average)
+
+    return class_averages
 
 
 def main(dataset_name: str, models_count: int, threshold: float):
@@ -197,11 +240,13 @@ def main(dataset_name: str, models_count: int, threshold: float):
 
     gaussian_curvatures = [abs(gc) for gc in gaussian_curvatures]
     # Combine proximity metrics, curvature metrics, and disjunct metrics
-    all_metrics = proximity_metrics + (gaussian_curvatures, mean_curvatures) + disjunct_metrics
+    all_metrics = proximity_metrics + (gaussian_curvatures, mean_curvatures)
+
+    class_averages = compute_class_averages_of_metrics(all_metrics, labels)
 
     # Extract the hardest samples for each metric and compute their class distributions
-    distributions_top, class_averages = extract_hard_samples(all_metrics, labels, [True] * 11, dataset_name, threshold)
-    distributions_bottom, _ = extract_hard_samples(all_metrics, labels, [False] * 11, dataset_name, threshold)
+    distributions_top = extract_hard_samples(all_metrics, labels, [True] * 20, dataset_name, threshold)
+    distributions_bottom = extract_hard_samples(all_metrics, labels, [False] * 20, dataset_name, threshold)
 
     # Find the hardest and easiest classes, analyze hard sample distribution and visualize results
     hardest_class = np.argmin(avg_class_accuracies)
@@ -210,8 +255,12 @@ def main(dataset_name: str, models_count: int, threshold: float):
     print(f"Easiest class accuracy (class {easiest_class}): {avg_class_accuracies[easiest_class]:.5f}%")
 
     # Compare and plot all metrics against class-level accuracies
-    compare_metrics_to_class_accuracies(distributions_top, avg_class_accuracies, num_classes)
-    compare_metrics_to_class_accuracies(distributions_bottom, avg_class_accuracies, num_classes)
+    compare_metrics_to_class_accuracies(distributions_top, avg_class_accuracies, num_classes,
+                                        f'{dataset_name}_topPCC.pdf')
+    compare_metrics_to_class_accuracies(distributions_bottom, avg_class_accuracies, num_classes,
+                                        f'{dataset_name}_botPCC.pdf')
+    compare_metrics_to_class_accuracies(class_averages, avg_class_accuracies, num_classes,
+                                        f'{dataset_name}_avgPCC.pdf')
 
 
 if __name__ == '__main__':
