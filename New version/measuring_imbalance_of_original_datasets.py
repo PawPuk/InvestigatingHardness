@@ -24,11 +24,9 @@ if torch.cuda.is_available():
 def detect_family(normalized_metric: np.ndarray, avg_gradients: List[float], second_derivatives: List[float]):
     if is_first_family_metric(avg_gradients):
         return 1
-    elif is_second_or_third_family_metric(normalized_metric, avg_gradients):
-        return is_second_or_third_family_metric(normalized_metric, avg_gradients)
-    elif is_fourth_family_metric(second_derivatives):
-        return 4
-    return 5
+    elif is_second_family_metric(normalized_metric, avg_gradients):
+        return 2
+    return 3
 
 
 def is_first_family_metric(avg_gradients: List[float]) -> bool:
@@ -43,7 +41,7 @@ def is_first_family_metric(avg_gradients: List[float]) -> bool:
     return right_most > 2 * middle_mean and left_most > 2 * middle_mean
 
 
-def is_second_or_third_family_metric(normalized_metric: np.ndarray, avg_gradients: List[float]) -> int:
+def is_second_family_metric(normalized_metric: np.ndarray, avg_gradients: List[float]) -> int:
     """Check if the metric belongs to the new family based on distribution and gradient."""
     # Check the normalized distribution (left side low, right side high)
     left_side_distribution = np.mean(normalized_metric[:500])
@@ -54,120 +52,92 @@ def is_second_or_third_family_metric(normalized_metric: np.ndarray, avg_gradient
     right_side_gradient = np.mean(avg_gradients[-20000:])
     # Check the condition: distribution (left low, right high) and first derivative (left high, right low)
     if left_side_distribution < right_side_distribution and left_side_gradient > right_side_gradient:
-        epsilon = 0.1 * abs(np.mean(avg_gradients[:500]))  # Epsilon is 1% of the leftmost gradient value
-        window_size = 500  # Window size to check increases over epsilon
-
-        # Traverse through the gradient and check for increases
-        for i in range(1, len(avg_gradients) - window_size):
-            current_gradient = np.mean(avg_gradients[i:i + window_size])
-            previous_gradient = np.mean(avg_gradients[i - 1:i - 1 + window_size])
-
-            # If we detect an increase over epsilon, it's Subfamily 2 (non-monotonic)
-            if current_gradient - previous_gradient > epsilon:
-                return 3
-
-        # If no significant increase is found, it's Subfamily 1 (monotonic)
-        return 2
-    return 0
+        return True
 
 
-def is_fourth_family_metric(second_derivatives: List[float]) -> bool:
-    """Check if the metric belongs to the fourth family by analyzing second derivatives."""
-    # Compute epsilon as a fraction of the right-most value
-    right_most_value = np.mean(second_derivatives[-500:])
-    epsilon = 0.01 * right_most_value  # 1% of the rightmost value as epsilon
-
-    # Traverse from right to left, checking windows of size 500
-    for i in range(len(second_derivatives) - 500, 0, -1):
-        window_mean = np.mean(second_derivatives[i:i + 500])
-
-        # If the window mean deviates by more than epsilon from the right-most value, return True
-        if abs(window_mean - right_most_value) > epsilon:
-            return True
-
-    return False
-
-
-def find_division_points_for_first_family(second_derivatives: np.ndarray, epsilon_fraction: float = 0.001,
-                                          window_size_1: int = 100, window_size_2: int = 500) -> Tuple[int, int]:
+def find_division_points_for_first_family(second_derivatives: np.ndarray, epsilon_fraction: float = 0.01,
+                                          window_size_1: int = 10000) -> Tuple[int, int]:
     """Find the first and second division points based on the second derivative analysis."""
     max_second_derivative = np.max(second_derivatives)
     epsilon = epsilon_fraction * max_second_derivative
 
+    # Initialize division points
     first_division_point = None
     second_division_point = None
+
+    # Find the second division point (from left to right)
+    for i in range(window_size_1, len(second_derivatives) - window_size_1):
+        if np.all(np.abs(second_derivatives[i:i + window_size_1]) < epsilon):
+            first_division_point = i
+            break
 
     # Find the first division point (from right to left)
     for i in range(len(second_derivatives) - 1, window_size_1 - 1, -1):
         if np.all(np.abs(second_derivatives[i - window_size_1:i]) < epsilon):
-            first_division_point = i
+            second_division_point = i
             break
-
-    if first_division_point is not None:
-        # Find the second division point (from first division point to the left)
-        for i in range(first_division_point, window_size_1 - 1, -1):
-            if np.all(np.abs(second_derivatives[i - window_size_1:i]) > 5 * epsilon):
-                second_division_point = i
-                break
 
     return first_division_point, second_division_point
 
-def find_division_points_for_second_family(data: np.ndarray, window_size: int = 500,
+
+def find_division_points_for_second_family(first_derivatives: np.ndarray, window_size: int = 500,
                                            epsilon_fraction: float = 0.01) -> Tuple[int, int]:
-    right_most_value = np.mean(data[-window_size:])
+    right_most_value = np.mean(first_derivatives[-window_size:])
     epsilon = epsilon_fraction * right_most_value
 
     # Start from the rightmost point and move left
-    for i in range(len(data) - window_size, 0, -1):
-        window_mean = np.mean(data[i:i + window_size])
+    for i in range(len(first_derivatives) - window_size, 0, -1):
+        window_mean = np.mean(first_derivatives[i:i + window_size])
         if abs(window_mean - right_most_value) > epsilon:
             return i + 500, i + 500  # Move the point slightly to the right
     raise Exception
 
-def find_division_points_for_third_family(data: np.ndarray, gradients: List[float], window_size: int = 500,
-                                          epsilon_fraction: float = 0.01) -> Tuple[int, int]:
-    """Find the right and left division points for the third family."""
-    # Find the right division point (same as in find_division_points_for_second_family)
-    right_most_value = np.mean(data[-window_size:])
-    epsilon = epsilon_fraction * right_most_value
+
+def find_division_points_for_third_family(second_derivatives: List[float], window_size1: int = 20000,
+                                          window_size2: int = 100, epsilon_factor: float = 50) -> Tuple[int, int]:
+    left_most_value = np.mean(second_derivatives[:window_size1])
+    epsilon = epsilon_factor * left_most_value
 
     # Start from the rightmost point and move left
-    right_division_point = len(data) - 1
-    for i in range(len(data) - window_size, 0, -1):
-        window_mean = np.mean(data[i:i + window_size])
-        if abs(window_mean - right_most_value) > epsilon:
-            right_division_point = i + 500
-            break
-
-    # Now find the left division point (move from left to right, starting at 0)
-    previous_windows_avg = []
-
-    for i in range(0, right_division_point - window_size):
-        current_window = np.mean(gradients[i:i + window_size])
-
-        # Track the previous 100 window averages
-        if len(previous_windows_avg) >= window_size:
-            previous_windows_avg.pop(0)  # Keep only the last 100 window averages
-        previous_windows_avg.append(current_window)
-
-        # If the current window's gradient is larger than the average of the last windows, the decreasing trend stopped
-        if len(previous_windows_avg) == window_size and current_window > np.mean(previous_windows_avg):
-            left_division_point = i
-            return left_division_point, right_division_point
+    for i in range(len(second_derivatives) - window_size2):
+        window_mean = np.mean(second_derivatives[i:i + window_size2])
+        if abs(window_mean - left_most_value) > epsilon:
+            return i + 500, i + 500  # Move the point slightly to the right
     raise Exception
+
 
 def plot_metric_results(metric_idx: int, sorted_normalized_metric: np.ndarray, avg_gradients: List[float],
                         avg_second_gradients: List[float], first_division_point: int, second_division_point: int,
-                        dataset_name: str):
-    """Plot the results with division points marked if applicable."""
+                        dataset_name: str, invert: bool):
+    """Plot the results with division points marked and areas colored as easy, medium, and hard."""
     fig, axes = plt.subplots(1, 3, figsize=(20, 6))
 
     # Plot sorted normalized metric
     axes[0].plot(sorted_normalized_metric, marker='o', linestyle='-')
+
+    # Define the regions (easy, medium, hard)
+    if first_division_point is not None and second_division_point is not None:
+        if first_division_point != second_division_point:
+            pass
+            # Color the medium region (between first and second division points) blue
+            axes[0].axvspan(first_division_point, second_division_point, facecolor='blue', alpha=0.3, label='Medium')
+
+        # Color the easy and hard regions based on the invert flag
+        if invert:
+            # If invert is True, left is hard (red), right is easy (green)
+            axes[0].axvspan(0, first_division_point, facecolor='red', alpha=0.3, label='Hard')
+            axes[0].axvspan(second_division_point, len(sorted_normalized_metric), facecolor='green', alpha=0.3, label='Easy')
+        else:
+            # If invert is False, left is easy (green), right is hard (red)
+            axes[0].axvspan(0, first_division_point, facecolor='green', alpha=0.3, label='Easy')
+            axes[0].axvspan(second_division_point, len(sorted_normalized_metric), facecolor='red', alpha=0.3, label='Hard')
+
+    # Add division lines
     if first_division_point is not None:
-        axes[0].axvline(x=first_division_point, color='red', linestyle='--', label='First Division')
+        axes[0].axvline(x=first_division_point, color='blue', linestyle='--', label='First Division')
     if second_division_point is not None:
         axes[0].axvline(x=second_division_point, color='blue', linestyle='--', label='Second Division')
+
     axes[0].set_title(f'Metric {metric_idx + 1} Normalized Distribution')
     axes[0].set_xlabel('Sample Index (Sorted)')
     axes[0].set_ylabel('Normalized Metric Value')
@@ -176,7 +146,7 @@ def plot_metric_results(metric_idx: int, sorted_normalized_metric: np.ndarray, a
     # Plot average gradient
     axes[1].plot(avg_gradients, marker='x', linestyle='-', color='r')
     if first_division_point is not None:
-        axes[1].axvline(x=first_division_point, color='red', linestyle='--', label='First Division')
+        axes[1].axvline(x=first_division_point, color='blue', linestyle='--', label='First Division')
     if second_division_point is not None:
         axes[1].axvline(x=second_division_point, color='blue', linestyle='--', label='Second Division')
     axes[1].set_title(f'Metric {metric_idx + 1} Average Gradients (First Derivative)')
@@ -187,7 +157,7 @@ def plot_metric_results(metric_idx: int, sorted_normalized_metric: np.ndarray, a
     # Plot second derivative
     axes[2].plot(avg_second_gradients, marker='x', linestyle='-', color='g')
     if first_division_point is not None:
-        axes[2].axvline(x=first_division_point, color='red', linestyle='--', label='First Division')
+        axes[2].axvline(x=first_division_point, color='blue', linestyle='--', label='First Division')
     if second_division_point is not None:
         axes[2].axvline(x=second_division_point, color='blue', linestyle='--', label='Second Division')
     axes[2].set_title(f'Metric {metric_idx + 1} Second Derivatives')
@@ -199,11 +169,15 @@ def plot_metric_results(metric_idx: int, sorted_normalized_metric: np.ndarray, a
     output_dir = 'metric_plots'
     os.makedirs(output_dir, exist_ok=True)
     plt.savefig(os.path.join(output_dir, f'{dataset_name}_metric_{metric_idx + 1}_distribution_gradients_second_derivatives.pdf'))
+    plt.savefig(os.path.join(output_dir,
+                             f'{dataset_name}_metric_{metric_idx + 1}_distribution_gradients_second_derivatives.png'))
+
     plt.close()
 
-def extract_extreme_samples(metrics: List[List[float]], labels: List[int], invert: List[bool], dataset_name: str,
-                            threshold: float = 0.05) -> Tuple[List[Dict[int, int]], List[List[int]]]:
 
+
+def extract_extreme_samples_via_hard_threshold(metrics: List[List[float]], labels: List[int], invert: List[bool],
+                                               dataset_name: str, threshold: float = 0.05):
     num_metrics = len(metrics)
     class_distributions = []
     extreme_indices = []
@@ -238,8 +212,33 @@ def extract_extreme_samples(metrics: List[List[float]], labels: List[int], inver
             class_distribution[class_label] += 1
         class_distributions.append(class_distribution)
 
+    return class_distributions, extreme_indices
+
+def extract_extreme_samples_via_soft_threshold(metrics: List[List[float]], labels: List[int], dataset_name: str,
+                                               invert: List[bool]) -> Tuple[List[int], List[int], List[Dict[int, int]], List[Dict[int, int]]]:
+    """Extract easy and hard samples based on the division points and invert logic, returning their indices and distributions."""
+    num_metrics = len(metrics)
+    easy_samples = []
+    hard_samples = []
+    easy_distributions = []
+    hard_distributions = []
+
+    for metric_idx in range(num_metrics):
+        selected_metric = np.array(metrics[metric_idx])
+        num_samples = len(selected_metric)
+
+        # Replace inf values with the maximum finite value
+        max_finite_value = np.max(selected_metric[np.isfinite(selected_metric)])
+        selected_metric[np.isinf(selected_metric)] = max_finite_value
+
+        # Normalize the selected metric (min-max normalization)
+        min_val = np.min(selected_metric)
+        max_val = np.max(selected_metric)
+        normalized_metric = (selected_metric - min_val) / (max_val - min_val)
+
         # Sort normalized metric for gradient computation
-        sorted_normalized_metric = np.sort(normalized_metric)
+        sorted_indices = np.argsort(normalized_metric)  # Get sorted indices to map back
+        sorted_normalized_metric = normalized_metric[sorted_indices]
 
         # Compute the first derivative (gradient) for the sorted normalized metric
         gradients = np.gradient(sorted_normalized_metric)
@@ -258,30 +257,55 @@ def extract_extreme_samples(metrics: List[List[float]], labels: List[int], inver
         # Compute the second derivative (gradient of the smoothed first derivative)
         second_derivatives = np.gradient(smoothed_avg_gradients)
 
-        # Compute second derivative averages for plotting
-        avg_second_gradients = []
-        window_size = 100
-        for i in range(window_size, num_samples - window_size):
-            start = max(0, i - window_size)
-            end = min(num_samples, i + window_size + 1)
-            avg_second_gradients.append(np.mean(second_derivatives[start:end]))
-
-        # Only apply division logic if it matches the first family
+        # Detect family and find division points
         first_division_point, second_division_point = None, None
-        family = detect_family(sorted_normalized_metric, avg_gradients, avg_second_gradients)
+        family = detect_family(sorted_normalized_metric, avg_gradients, second_derivatives)
         print(f'Metric {metric_idx + 1} is of family {family}.')
         if family == 1:
             first_division_point, second_division_point = find_division_points_for_first_family(second_derivatives)
         elif family == 2:
-            first_division_point, second_division_point = find_division_points_for_second_family(sorted_normalized_metric)
+            first_division_point, second_division_point = find_division_points_for_second_family(smoothed_avg_gradients)
         elif family == 3:
-            first_division_point, second_division_point = find_division_points_for_third_family(sorted_normalized_metric,
-                                                                                                avg_gradients)
+            first_division_point, second_division_point = find_division_points_for_third_family(second_derivatives)
+
+        # Dictionaries to hold the distribution of easy and hard samples per class
+        easy_dist = defaultdict(int)
+        hard_dist = defaultdict(int)
+
+        # Extract easy and hard samples based on division points and invert logic
+        if first_division_point is not None and second_division_point is not None:
+            if invert[metric_idx]:
+                # If invert is True: Left side (before first division point) is hard, right side (after second) is easy
+                hard_indices = sorted_indices[:first_division_point]
+                easy_indices = sorted_indices[second_division_point:]
+            else:
+                # If invert is False: Left side (before first division point) is easy, right side (after second) is hard
+                easy_indices = sorted_indices[:first_division_point]
+                hard_indices = sorted_indices[second_division_point:]
+
+            # Add indices to the global easy and hard sample lists
+            easy_samples.append(easy_indices.tolist())
+            hard_samples.append(hard_indices.tolist())
+
+            # Compute class distributions for easy and hard samples
+            for idx in easy_indices:
+                class_label = labels[idx]
+                easy_dist[class_label] += 1
+
+            for idx in hard_indices:
+                class_label = labels[idx]
+                hard_dist[class_label] += 1
+
+        # Append the distributions for this metric
+        easy_distributions.append(easy_dist)
+        hard_distributions.append(hard_dist)
+
         # Plot results
-        plot_metric_results(metric_idx, sorted_normalized_metric, avg_gradients, avg_second_gradients,
-                            first_division_point, second_division_point, dataset_name)
-    print(len(123))
-    return class_distributions, extreme_indices
+        plot_metric_results(metric_idx, sorted_normalized_metric, avg_gradients, second_derivatives,
+                            first_division_point, second_division_point, dataset_name, invert[metric_idx])
+
+    return easy_samples, hard_samples, easy_distributions, hard_distributions
+
 
 
 
@@ -395,6 +419,7 @@ def compute_class_averages_of_metrics(metrics, labels):
 
 def compute_correlation_heatmaps(easy_distribution, hard_distribution, output_dir="heatmaps"):
     num_metrics = len(easy_distribution)
+    print(num_metrics)
 
     easy_overlap = np.zeros((num_metrics, num_metrics))
     hard_overlap = np.zeros((num_metrics, num_metrics))
@@ -488,10 +513,8 @@ def main(dataset_name: str, models_count: int, threshold: float):
                       False, False, False]
 
     # Extract the hardest samples for each metric and compute their class distributions
-    easy_distribution, easy_indices = extract_extreme_samples(all_metrics, labels, invert_metrics, dataset_name,
-                                                              threshold)
-    hard_distribution, hard_indices = extract_extreme_samples(all_metrics, labels, [not b for b in invert_metrics],
-                                                              dataset_name, threshold)
+    easy_indices, hard_indices, easy_distribution, hard_distribution = (
+        extract_extreme_samples_via_soft_threshold(all_metrics, labels, dataset_name, invert_metrics))
 
     print(hard_distribution)
 
@@ -502,7 +525,7 @@ def main(dataset_name: str, models_count: int, threshold: float):
     print(easy_distribution)
 
     # Compute and visualize the correlation heatmaps
-    compute_correlation_heatmaps(easy_indices, hard_indices)
+    # compute_correlation_heatmaps(easy_indices, hard_indices)
 
     # Find the hardest and easiest classes, analyze hard sample distribution and visualize results
     hardest_class = np.argmin(avg_class_accuracies)
