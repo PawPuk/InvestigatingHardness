@@ -14,7 +14,7 @@ import utils as u
 
 
 class Curvature:
-    def __init__(self, data, data_indices, k=15, pca_components=8):
+    def __init__(self, data, data_indices, k=40, pca_components=8):
         self.data = data.reshape(data.shape[0], -1)  # Flatten the images (required for image datasets)
         self.data_indices = data_indices
         self.k = k

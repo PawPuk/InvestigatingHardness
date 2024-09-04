@@ -5,6 +5,7 @@ from typing import List, Dict, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 from scipy.signal import savgol_filter
 from scipy.stats import pearsonr
 import torch
@@ -32,13 +33,13 @@ def detect_family(normalized_metric: np.ndarray, avg_gradients: List[float], sec
 def is_first_family_metric(avg_gradients: List[float]) -> bool:
     """Check if the metric belongs to the first family."""
     # Check if the rightmost points have the highest value
-    right_most = np.mean(avg_gradients[-100:])
+    right_most = np.mean(avg_gradients[-1000:])
     # Check if the leftmost points are higher than the mean of the middle samples
-    left_most = np.mean(avg_gradients[:100])
-    middle_mean = np.mean(avg_gradients[len(avg_gradients)//2 - 500: len(avg_gradients)//2 + 500])
+    left_most = np.mean(avg_gradients[:1000])
+    middle_mean = np.mean(avg_gradients[len(avg_gradients)//2 - 10000: len(avg_gradients)//2 + 10000])
 
     # Conditions: rightmost should be highest, leftmost should be higher than the middle mean
-    return right_most > 2 * middle_mean and left_most > 2 * middle_mean
+    return right_most > 3 * middle_mean and left_most > 3 * middle_mean
 
 
 def is_second_family_metric(normalized_metric: np.ndarray, avg_gradients: List[float]) -> int:
@@ -94,10 +95,10 @@ def find_division_points_for_second_family(first_derivatives: np.ndarray, window
 
 
 def find_division_points_for_third_family(second_derivatives: List[float], window_size1: int = 20000,
-                                          window_size2: int = 100, epsilon_factor: float = 50) -> Tuple[int, int]:
+                                          window_size2: int = 100, epsilon_factor: float = 100) -> Tuple[int, int]:
     left_most_value = np.mean(second_derivatives[:window_size1])
     epsilon = epsilon_factor * left_most_value
-
+    print(left_most_value)
     # Start from the rightmost point and move left
     for i in range(len(second_derivatives) - window_size2):
         window_mean = np.mean(second_derivatives[i:i + window_size2])
@@ -333,12 +334,8 @@ def compare_metrics_to_class_accuracies(class_distributions, avg_class_accuracie
     for class_distribution in class_distributions:
         class_level_distribution = [class_distribution.get(cls, 0) for cls in range(num_classes)]
 
-        # Normalize the distribution to [0, 1]
-        normalized_distribution = (class_level_distribution - np.min(class_level_distribution)) / \
-                                  (np.max(class_level_distribution) - np.min(class_level_distribution))
-
         # Compute Pearson correlation coefficient
-        correlation, _ = pearsonr(avg_class_accuracies, normalized_distribution)
+        correlation, _ = pearsonr(avg_class_accuracies, class_level_distribution)
         correlations.append(correlation)
 
     # Define colors based on correlation strength
@@ -388,13 +385,10 @@ def compute_class_averages_of_metrics(metrics, labels):
     class_averages = []
 
     for metric in metrics:
-        # Handle inf values: replace them with the second largest value
+        # Handle inf values: replace them with the now-largest values (max * 2)
         metric = np.array(metric)
-        if np.isinf(metric).any():
-            finite_vals = metric[np.isfinite(metric)]
-            if len(finite_vals) > 0:
-                second_largest = np.partition(finite_vals, -2)[-2]  #  TODO: change to use largest finite value
-                metric[np.isinf(metric)] = second_largest
+        max_finite_value = np.max(metric[np.isfinite(metric)])
+        metric[np.isinf(metric)] = max_finite_value * 2
 
         # Normalize by dividing by the maximum value in the metric
         max_val = np.max(metric)
@@ -448,6 +442,59 @@ def compute_correlation_heatmaps(easy_distribution, hard_distribution, output_di
     plt.savefig(os.path.join(output_dir, "hard_overlap_heatmap.pdf"))
     plt.show()
     plt.close()
+
+
+def compute_easy_hard_ratios(dataset_name: str, easy_indices: List[np.ndarray], hard_indices: List[np.ndarray]) -> None:
+    """Compute the ratio of easy to hard samples in both training and test splits for each metric and display as a table."""
+
+    # Load the training and test datasets using the provided function
+    train_dataset, test_dataset = u.load_data_and_normalize(dataset_name)
+
+    # Extract the targets (labels) from the datasets
+    train_targets = train_dataset.targets if hasattr(train_dataset, 'targets') else train_dataset.tensors[1]
+    test_targets = test_dataset.targets if hasattr(test_dataset, 'targets') else test_dataset.tensors[1]
+
+    # Extract indices of the training and test sets
+    train_indices = list(range(len(train_targets)))
+    test_indices = list(range(len(test_targets)))
+
+    # Initialize lists to store the data for the table
+    metrics_data = []
+
+    # Loop over each metric's array of easy and hard indices
+    for metric_idx in range(len(easy_indices)):
+        easy_idx = easy_indices[metric_idx]
+        hard_idx = hard_indices[metric_idx]
+
+        # Compute counts of easy and hard samples in the training set for this metric
+        easy_train_count = sum([1 for idx in easy_idx if idx in train_indices])
+        hard_train_count = sum([1 for idx in hard_idx if idx in train_indices])
+
+        # Compute counts of easy and hard samples in the test set for this metric
+        easy_test_count = sum([1 for idx in easy_idx if idx in test_indices])
+        hard_test_count = sum([1 for idx in hard_idx if idx in test_indices])
+
+        # Compute the ratios for training and test sets for this metric
+        train_ratio = easy_train_count / hard_train_count if hard_train_count > 0 else float('inf')
+        test_ratio = easy_test_count / hard_test_count if hard_test_count > 0 else float('inf')
+
+        # Append the results to the metrics_data list
+        metrics_data.append({
+            'Metric': metric_idx + 1,
+            'Easy Train': easy_train_count,
+            'Hard Train': hard_train_count,
+            'Train Ratio (Easy/Hard)': train_ratio,
+            'Easy Test': easy_test_count,
+            'Hard Test': hard_test_count,
+            'Test Ratio (Easy/Hard)': test_ratio
+        })
+
+    # Create a DataFrame to display the results
+    df = pd.DataFrame(metrics_data)
+
+    # Print the table
+    print("\nEasy-to-Hard Sample Ratios Across Metrics:\n")
+    print(df.to_string(index=False))
 
 
 def main(dataset_name: str, models_count: int, threshold: float):
@@ -540,6 +587,8 @@ def main(dataset_name: str, models_count: int, threshold: float):
                                         f'{dataset_name}_hardPCC.pdf')
     compare_metrics_to_class_accuracies(class_averages, avg_class_accuracies, num_classes,
                                         f'{dataset_name}_avgPCC.pdf')
+
+    compute_easy_hard_ratios(dataset_name, easy_indices, hard_indices)
 
 
 if __name__ == '__main__':

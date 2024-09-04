@@ -54,14 +54,14 @@ def compute_curvatures(loader: DataLoader):
     for cls, class_loader in tqdm(class_loaders.items(), desc='Iterating through classes.'):
         for data, _ in class_loader:
             data.to(u.DEVICE)
-            Curvature(data, class_indices[cls], k=10).estimate_curvatures(gaussian_curvatures, mean_curvatures)
+            Curvature(data, class_indices[cls], k=40).estimate_curvatures(gaussian_curvatures, mean_curvatures)
 
     return gaussian_curvatures, mean_curvatures
 
 
 def compute_proximity_metrics(loader: DataLoader, gaussian_curvatures: List[float]):
     """Compute the geometric metrics of the data that can be used to identify hard samples, class-wise."""
-    proximity = Proximity(loader, gaussian_curvatures, k=20)
+    proximity = Proximity(loader, gaussian_curvatures, k=40)
     proximity_metrics = proximity.compute_proximity_metrics()
     return proximity_metrics
 
