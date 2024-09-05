@@ -24,8 +24,7 @@ class EnsembleTrainer:
         self.save = save
         self.models = []
 
-    def train_ensemble(self, train_loader: DataLoader, test_loader: Union[DataLoader, None] = None,
-                       imbalanced_ratio: float = 1.0):
+    def train_ensemble(self, train_loader: DataLoader, test_loader: Union[DataLoader, None] = None):
         """Train an ensemble of models on the full dataset."""
         for i in tqdm(range(self.models_count)):
             model = LeNet().to(u.DEVICE)
@@ -35,7 +34,6 @@ class EnsembleTrainer:
             self.models.append(model)
             # Save model state
             if self.save:
-
                 torch.save(model.state_dict(), f"{u.MODEL_SAVE_DIR}{['part, full'][train_loader == test_loader]}"
                                                f"{self.dataset_name}_{self.models_count}_ensemble_{i}.pth",
                            _use_new_zipfile_serialization=False)  # Ensuring backward compatibility
@@ -49,21 +47,17 @@ class EnsembleTrainer:
         return self.models
 
 
-def main(dataset_name: str, models_count: int, long_tailed: bool, imbalance_ratio: float):
+def main(dataset_name: str, models_count: int):
     trainer = EnsembleTrainer(dataset_name, models_count, True)
-    train_dataset, test_dataset = u.load_data_and_normalize(dataset_name, long_tailed, imbalance_ratio)
+    train_dataset, test_dataset = u.load_data_and_normalize(dataset_name)
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=1000, shuffle=False)
-    trainer.train_ensemble(train_loader, test_loader, imbalance_ratio)
+    trainer.train_ensemble(train_loader, test_loader)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train an ensemble of models on the full dataset and save parameters.')
     parser.add_argument('--dataset_name', type=str, default='MNIST')
     parser.add_argument('--models_count', type=int, default=20, help='Number of models in the ensemble.')
-    parser.add_argument('--long_tailed', type=bool, default=False,
-                        help='Flag to indicate if the dataset should be long-tailed.')
-    parser.add_argument('--imbalance_ratio', type=float, default=1.0,
-                        help='Imbalance ratio for long-tailed dataset.')
     args = parser.parse_args()
     main(**vars(args))
