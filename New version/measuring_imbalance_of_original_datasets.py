@@ -95,7 +95,7 @@ def find_division_points_for_second_family(first_derivatives: np.ndarray, window
 
 
 def find_division_points_for_third_family(second_derivatives: List[float], window_size1: int = 20000,
-                                          window_size2: int = 100, epsilon_factor: float = 100) -> Tuple[int, int]:
+                                          window_size2: int = 500, epsilon_factor: float = 250) -> Tuple[int, int]:
     left_most_value = np.mean(second_derivatives[:window_size1])
     epsilon = epsilon_factor * left_most_value
     print(left_most_value)
@@ -109,9 +109,17 @@ def find_division_points_for_third_family(second_derivatives: List[float], windo
 
 def plot_metric_results(metric_idx: int, sorted_normalized_metric: np.ndarray, avg_gradients: List[float],
                         avg_second_gradients: List[float], first_division_point: int, second_division_point: int,
-                        dataset_name: str, invert: bool):
-    """Plot the results with division points marked and areas colored as easy, medium, and hard."""
+                        dataset_name: str, invert: bool, hard_threshold_percent: float):
+    """Plot the results with division points marked and areas colored as easy, medium, and hard, along with hard thresholds."""
     fig, axes = plt.subplots(1, 3, figsize=(20, 6))
+
+    num_samples = len(sorted_normalized_metric)
+    hard_threshold_count = int(hard_threshold_percent * num_samples)
+    print(num_samples, hard_threshold_count)
+
+    # Compute the locations of the hard threshold lines
+    hard_easy_index = hard_threshold_count  # This is the last index for the easy threshold
+    hard_hard_index = num_samples - hard_threshold_count  # This is the first index for the hard threshold
 
     # Plot sorted normalized metric
     axes[0].plot(sorted_normalized_metric, marker='o', linestyle='-')
@@ -119,7 +127,6 @@ def plot_metric_results(metric_idx: int, sorted_normalized_metric: np.ndarray, a
     # Define the regions (easy, medium, hard)
     if first_division_point is not None and second_division_point is not None:
         if first_division_point != second_division_point:
-            pass
             # Color the medium region (between first and second division points) blue
             axes[0].axvspan(first_division_point, second_division_point, facecolor='blue', alpha=0.3, label='Medium')
 
@@ -133,11 +140,15 @@ def plot_metric_results(metric_idx: int, sorted_normalized_metric: np.ndarray, a
             axes[0].axvspan(0, first_division_point, facecolor='green', alpha=0.3, label='Easy')
             axes[0].axvspan(second_division_point, len(sorted_normalized_metric), facecolor='red', alpha=0.3, label='Hard')
 
-    # Add division lines
+    # Add division lines for adaptive (soft) thresholds
     if first_division_point is not None:
         axes[0].axvline(x=first_division_point, color='blue', linestyle='--', label='First Division')
     if second_division_point is not None:
         axes[0].axvline(x=second_division_point, color='blue', linestyle='--', label='Second Division')
+
+    # Add hard threshold lines (black vertical lines)
+    axes[0].axvline(x=hard_easy_index, color='black', linestyle='-', label='Hard Easy Threshold')
+    axes[0].axvline(x=hard_hard_index, color='black', linestyle='-', label='Hard Hard Threshold')
 
     axes[0].set_title(f'Metric {metric_idx + 1} Normalized Distribution')
     axes[0].set_xlabel('Sample Index (Sorted)')
@@ -150,6 +161,8 @@ def plot_metric_results(metric_idx: int, sorted_normalized_metric: np.ndarray, a
         axes[1].axvline(x=first_division_point, color='blue', linestyle='--', label='First Division')
     if second_division_point is not None:
         axes[1].axvline(x=second_division_point, color='blue', linestyle='--', label='Second Division')
+    axes[1].axvline(x=hard_easy_index, color='black', linestyle='-', label='Hard Easy Threshold')
+    axes[1].axvline(x=hard_hard_index, color='black', linestyle='-', label='Hard Hard Threshold')
     axes[1].set_title(f'Metric {metric_idx + 1} Average Gradients (First Derivative)')
     axes[1].set_xlabel('Sample Index')
     axes[1].set_ylabel('Average Gradient')
@@ -161,6 +174,8 @@ def plot_metric_results(metric_idx: int, sorted_normalized_metric: np.ndarray, a
         axes[2].axvline(x=first_division_point, color='blue', linestyle='--', label='First Division')
     if second_division_point is not None:
         axes[2].axvline(x=second_division_point, color='blue', linestyle='--', label='Second Division')
+    axes[2].axvline(x=hard_easy_index, color='black', linestyle='-', label='Hard Easy Threshold')
+    axes[2].axvline(x=hard_hard_index, color='black', linestyle='-', label='Hard Hard Threshold')
     axes[2].set_title(f'Metric {metric_idx + 1} Second Derivatives')
     axes[2].set_xlabel('Sample Index')
     axes[2].set_ylabel('Second Derivative')
@@ -177,60 +192,30 @@ def plot_metric_results(metric_idx: int, sorted_normalized_metric: np.ndarray, a
 
 
 
-def extract_extreme_samples_via_hard_threshold(metrics: List[List[float]], labels: List[int], invert: List[bool],
-                                               dataset_name: str, threshold: float = 0.05):
+def extract_extreme_samples_threshold(metrics: List[List[float]], labels: List[int], dataset_name: str,
+                                      invert: List[bool], hard_threshold_percent: float = 0.05):
+    """Extract easy and hard samples using both adaptive and hard thresholds, returning their indices and distributions."""
     num_metrics = len(metrics)
-    class_distributions = []
-    extreme_indices = []
+
+    # Initialize lists for soft (adaptive) and hard threshold indices and distributions
+    adaptive_easy_samples = []
+    adaptive_hard_samples = []
+    adaptive_easy_distributions = []
+    adaptive_hard_distributions = []
+
+    hard_easy_samples = []
+    hard_hard_samples = []
+    hard_easy_distributions = []
+    hard_hard_distributions = []
 
     for metric_idx in range(num_metrics):
         selected_metric = np.array(metrics[metric_idx])
         num_samples = len(selected_metric)
-        num_extreme_samples = int(threshold * num_samples)
+        hard_threshold_count = int(hard_threshold_percent * num_samples)
 
         # Replace inf values with the maximum finite value
         max_finite_value = np.max(selected_metric[np.isfinite(selected_metric)])
-        selected_metric[np.isinf(selected_metric)] = max_finite_value
-
-        # Normalize the selected metric (min-max normalization)
-        min_val = np.min(selected_metric)
-        max_val = np.max(selected_metric)
-        normalized_metric = (selected_metric - min_val) / (max_val - min_val)
-
-        # Sort the samples by the normalized metric
-        if invert[metric_idx]:
-            sorted_indices = np.argsort(normalized_metric)[-num_extreme_samples:]
-        else:
-            sorted_indices = np.argsort(normalized_metric)[:num_extreme_samples]
-
-        # Store the indices of the extreme samples
-        extreme_indices.append(sorted_indices.tolist())
-
-        # Compute the distribution of these samples across different classes
-        class_distribution = defaultdict(int)
-        for idx in sorted_indices:
-            class_label = labels[idx]
-            class_distribution[class_label] += 1
-        class_distributions.append(class_distribution)
-
-    return class_distributions, extreme_indices
-
-def extract_extreme_samples_via_soft_threshold(metrics: List[List[float]], labels: List[int], dataset_name: str,
-                                               invert: List[bool]):
-    """Extract easy and hard samples based on the division points and invert logic, returning their indices and distributions."""
-    num_metrics = len(metrics)
-    easy_samples = []
-    hard_samples = []
-    easy_distributions = []
-    hard_distributions = []
-
-    for metric_idx in range(num_metrics):
-        selected_metric = np.array(metrics[metric_idx])
-        num_samples = len(selected_metric)
-
-        # Replace inf values with the maximum finite value
-        max_finite_value = np.max(selected_metric[np.isfinite(selected_metric)])
-        selected_metric[np.isinf(selected_metric)] = max_finite_value
+        selected_metric[np.isinf(selected_metric)] = max_finite_value * 2
 
         # Normalize the selected metric (min-max normalization)
         min_val = np.min(selected_metric)
@@ -258,7 +243,7 @@ def extract_extreme_samples_via_soft_threshold(metrics: List[List[float]], label
         # Compute the second derivative (gradient of the smoothed first derivative)
         second_derivatives = np.gradient(smoothed_avg_gradients)
 
-        # Detect family and find division points
+        # Detect family and find division points for adaptive (soft) thresholds
         first_division_point, second_division_point = None, None
         family = detect_family(sorted_normalized_metric, avg_gradients)
         print(f'Metric {metric_idx + 1} is of family {family}.')
@@ -270,42 +255,67 @@ def extract_extreme_samples_via_soft_threshold(metrics: List[List[float]], label
             first_division_point, second_division_point = find_division_points_for_third_family(second_derivatives)
 
         # Dictionaries to hold the distribution of easy and hard samples per class
-        easy_dist = defaultdict(int)
-        hard_dist = defaultdict(int)
+        adaptive_easy_dist = defaultdict(int)
+        adaptive_hard_dist = defaultdict(int)
 
-        # Extract easy and hard samples based on division points and invert logic
+        hard_easy_dist = defaultdict(int)
+        hard_hard_dist = defaultdict(int)
+
+        # Adaptive (soft) threshold logic based on division points and invert flag
         if first_division_point is not None and second_division_point is not None:
             if invert[metric_idx]:
-                # If invert is True: Left side (before first division point) is hard, right side (after second) is easy
-                hard_indices = sorted_indices[:first_division_point]
-                easy_indices = sorted_indices[second_division_point:]
+                # If invert is True: Left side is hard, right side is easy
+                adaptive_hard_indices = sorted_indices[:first_division_point]
+                adaptive_easy_indices = sorted_indices[second_division_point:]
+                hard_hard_indices = sorted_indices[:hard_threshold_count]
+                hard_easy_indices = sorted_indices[-hard_threshold_count:]
             else:
-                # If invert is False: Left side (before first division point) is easy, right side (after second) is hard
-                easy_indices = sorted_indices[:first_division_point]
-                hard_indices = sorted_indices[second_division_point:]
+                # If invert is False: Left side is easy, right side is hard
+                adaptive_easy_indices = sorted_indices[:first_division_point]
+                adaptive_hard_indices = sorted_indices[second_division_point:]
+                hard_easy_indices = sorted_indices[:hard_threshold_count]
+                hard_hard_indices = sorted_indices[-hard_threshold_count:]
 
-            # Add indices to the global easy and hard sample lists
-            easy_samples.append(easy_indices.tolist())
-            hard_samples.append(hard_indices.tolist())
+            # Store those samples
+            adaptive_easy_samples.append(adaptive_easy_indices.tolist())
+            adaptive_hard_samples.append(adaptive_hard_indices.tolist())
+            hard_easy_samples.append(hard_easy_indices.tolist())
+            hard_hard_samples.append(hard_hard_indices.tolist())
 
-            # Compute class distributions for easy and hard samples
-            for idx in easy_indices:
+            # Compute class distributions for those samples
+            for idx in adaptive_easy_indices:
                 class_label = labels[idx]
-                easy_dist[class_label] += 1
+                adaptive_easy_dist[class_label] += 1
 
-            for idx in hard_indices:
+            for idx in adaptive_hard_indices:
                 class_label = labels[idx]
-                hard_dist[class_label] += 1
+                adaptive_hard_dist[class_label] += 1
 
-        # Append the distributions for this metric
-        easy_distributions.append(easy_dist)
-        hard_distributions.append(hard_dist)
+            for idx in hard_easy_indices:
+                class_label = labels[idx]
+                hard_easy_dist[class_label] += 1
 
-        # Plot results
+            for idx in hard_hard_indices:
+                class_label = labels[idx]
+                hard_hard_dist[class_label] += 1
+        else:
+            raise Exception
+
+        # Append the distributions
+        adaptive_easy_distributions.append(adaptive_easy_dist)
+        adaptive_hard_distributions.append(adaptive_hard_dist)
+        hard_easy_distributions.append(hard_easy_dist)
+        hard_hard_distributions.append(hard_hard_dist)
+
+        # Plot results and pass hard thresholds to the plotting function
         plot_metric_results(metric_idx, sorted_normalized_metric, avg_gradients, second_derivatives,
-                            first_division_point, second_division_point, dataset_name, invert[metric_idx])
+                            first_division_point, second_division_point, dataset_name, invert[metric_idx],
+                            hard_threshold_percent)
 
-    return easy_samples, hard_samples, easy_distributions, hard_distributions
+    return (adaptive_easy_samples, adaptive_hard_samples, adaptive_easy_distributions, adaptive_hard_distributions,
+            hard_easy_samples, hard_hard_samples, hard_easy_distributions, hard_hard_distributions)
+
+
 
 
 
@@ -411,7 +421,7 @@ def compute_class_averages_of_metrics(metrics, labels):
     return class_averages
 
 
-def compute_correlation_heatmaps(easy_distribution, hard_distribution, output_dir="heatmaps"):
+def compute_correlation_heatmaps(easy_distribution, hard_distribution, threshold, output_dir="heatmaps"):
     num_metrics = len(easy_distribution)
     print(num_metrics)
 
@@ -431,14 +441,14 @@ def compute_correlation_heatmaps(easy_distribution, hard_distribution, output_di
     plt.imshow(easy_overlap, cmap='hot', interpolation='nearest')
     plt.colorbar()
     plt.title("Easy Samples Overlap Heatmap")
-    plt.savefig(os.path.join(output_dir, "easy_overlap_heatmap.pdf"))
+    plt.savefig(os.path.join(output_dir, f"{threshold}_easy_overlap_heatmap.pdf"))
     plt.close()
 
     plt.figure(figsize=(10, 8))
     plt.imshow(hard_overlap, cmap='hot', interpolation='nearest')
     plt.colorbar()
     plt.title("Hard Samples Overlap Heatmap")
-    plt.savefig(os.path.join(output_dir, "hard_overlap_heatmap.pdf"))
+    plt.savefig(os.path.join(output_dir, f"{threshold}_hard_overlap_heatmap.pdf"))
     plt.close()
 
 
@@ -558,19 +568,13 @@ def main(dataset_name: str, models_count: int, threshold: float):
                           False, False, False]
 
         # Extract the hardest samples for each metric and compute their class distributions
-        easy_indices, hard_indices, easy_distribution, hard_distribution = (
-            extract_extreme_samples_via_soft_threshold(all_metrics, labels, dataset_name, invert_metrics))
-
-        print(hard_distribution)
-
-        print()
-        print('-'*20)
-        print()
-
-        print(easy_distribution)
+        adaptive_easy_indices, adaptive_hard_indices, adaptive_easy_distributions, adaptive_hard_distributions, \
+            fixed_easy_indices, fixed_hard_indices, fixed_easy_distributions, fixed_hard_distributions = (
+            extract_extreme_samples_threshold(all_metrics, labels, dataset_name, invert_metrics))
 
         # Compute and visualize the correlation heatmaps
-        compute_correlation_heatmaps(easy_indices, hard_indices)
+        compute_correlation_heatmaps(adaptive_easy_indices, adaptive_hard_indices, 'adaptive')
+        compute_correlation_heatmaps(fixed_easy_indices, fixed_hard_indices, 'fixed')
 
         # Find the hardest and easiest classes, analyze hard sample distribution and visualize results
         hardest_class = np.argmin(avg_class_accuracies)
@@ -579,17 +583,23 @@ def main(dataset_name: str, models_count: int, threshold: float):
         print(f"Easiest class accuracy (class {easiest_class}): {avg_class_accuracies[easiest_class]:.5f}%")
 
         # Compare and plot all metrics against class-level accuracies
-        compare_metrics_to_class_accuracies(easy_distribution, avg_class_accuracies, num_classes,
-                                            f'{dataset_name}_easyPCC.pdf')
-        compare_metrics_to_class_accuracies(hard_distribution, avg_class_accuracies, num_classes,
-                                            f'{dataset_name}_hardPCC.pdf')
+        compare_metrics_to_class_accuracies(adaptive_easy_distributions, avg_class_accuracies, num_classes,
+                                            f'{dataset_name}_adaptive_easyPCC.pdf')
+        compare_metrics_to_class_accuracies(adaptive_hard_distributions, avg_class_accuracies, num_classes,
+                                            f'{dataset_name}_adaptive_hardPCC.pdf')
+        compare_metrics_to_class_accuracies(fixed_easy_distributions, avg_class_accuracies, num_classes,
+                                            f'{dataset_name}_fixed_easyPCC.pdf')
+        compare_metrics_to_class_accuracies(fixed_hard_distributions, avg_class_accuracies, num_classes,
+                                            f'{dataset_name}_fixed_hardPCC.pdf')
         compare_metrics_to_class_accuracies(class_averages, avg_class_accuracies, num_classes,
                                             f'{dataset_name}_avgPCC.pdf')
 
-        compute_easy_hard_ratios(dataset_name, easy_indices, hard_indices)
+        compute_easy_hard_ratios(dataset_name, adaptive_easy_indices, adaptive_hard_indices)
 
-        u.save_data(easy_indices, f'{u.DIVISIONS_SAVE_DIR}/{dataset_name}_easy_indices.pkl')
-        u.save_data(hard_indices, f'{u.DIVISIONS_SAVE_DIR}/{dataset_name}_hard_indices.pkl')
+        u.save_data(adaptive_easy_indices, f'{u.DIVISIONS_SAVE_DIR}/{dataset_name}_adaptive_easy_indices.pkl')
+        u.save_data(adaptive_hard_indices, f'{u.DIVISIONS_SAVE_DIR}/{dataset_name}_adaptive_hard_indices.pkl')
+        u.save_data(fixed_easy_indices, f'{u.DIVISIONS_SAVE_DIR}/{dataset_name}_fixed_easy_indices.pkl')
+        u.save_data(fixed_hard_indices, f'{u.DIVISIONS_SAVE_DIR}/{dataset_name}_fixed_hard_indices.pkl')
     else:
         raise Exception('Afaik kNN is not faster on GPUs so there is no running it on them.')
 
