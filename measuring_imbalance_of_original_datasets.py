@@ -7,12 +7,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.signal import savgol_filter
-from scipy.stats import pearsonr
+from scipy.stats import kendalltau, pearsonr, spearmanr
 import torch
 from torch.utils.data import DataLoader
 
-from compute_confidences import compute_curvatures, compute_disjuncts, compute_proximity_metrics
-from train_ensembles import EnsembleTrainer
+from compute_confidences import compute_curvatures, compute_proximity_metrics
 import utils as u
 
 # Set random seeds for reproducibility
@@ -115,7 +114,6 @@ def plot_metric_results(metric_idx: int, sorted_normalized_metric: np.ndarray, a
 
     num_samples = len(sorted_normalized_metric)
     hard_threshold_count = int(hard_threshold_percent * num_samples)
-    print(num_samples, hard_threshold_count)
 
     # Compute the locations of the hard threshold lines
     hard_easy_index = hard_threshold_count  # This is the last index for the easy threshold
@@ -316,23 +314,25 @@ def extract_extreme_samples_threshold(metrics: List[List[float]], labels: List[i
             hard_easy_samples, hard_hard_samples, hard_easy_distributions, hard_hard_distributions)
 
 
-
-
-
-
-def compare_metrics_to_class_accuracies(class_distributions, avg_class_accuracies, num_classes, output_filename):
+def compare_metrics_to_class_accuracies(class_distributions, avg_class_accuracies, num_classes, pcc_output_filename,
+                                        spearman_output_filename):
     """
     Compare the class-level distribution of hard samples to the class-level accuracies
-    for each metric by computing Pearson Correlation Coefficient (PCC) and plotting the results.
+    for each metric by computing Pearson Correlation Coefficient (PCC) and Spearman's Rank Correlation,
+    and plotting the results for both correlations.
 
     :param class_distributions: List of dictionaries, each containing class labels as keys and the count of hardest
     samples as values for each metric.
     :param avg_class_accuracies: The average accuracies for each class.
     :param num_classes: The number of classes in the dataset.
-    :param output_filename: The filename for saving the PCC bar plot.
-    :return: A list of PCCs for each metric.
+    :param pcc_output_filename: The filename for saving the PCC bar plot.
+    :param spearman_output_filename: The filename for saving the Spearman bar plot.
     """
-    correlations = []
+    correlations_pcc = []
+    p_values_pcc = []
+    correlations_spearman = []
+    p_values_spearman = []
+
     metric_abbreviations = [
         'SCD', 'OCD', 'CR', 'CSC', 'COC', 'CDR',
         'ASD', 'AOD', 'AAD', 'ADR', 'PSK',
@@ -340,33 +340,58 @@ def compare_metrics_to_class_accuracies(class_distributions, avg_class_accuracie
         'MC'
     ]  # Abbreviations for each metric to keep plot readable.
 
-    # Compute PCC for each metric
+    # Compute both PCC and Spearman for each metric
     for class_distribution in class_distributions:
         class_level_distribution = [class_distribution.get(cls, 0) for cls in range(num_classes)]
 
         # Compute Pearson correlation coefficient
-        correlation, _ = pearsonr(avg_class_accuracies, class_level_distribution)
-        correlations.append(correlation)
+        correlation_pcc, p_value_pcc = pearsonr(avg_class_accuracies, class_level_distribution)
+        correlations_pcc.append(correlation_pcc)
+        p_values_pcc.append(p_value_pcc)
 
-    # Define colors based on correlation strength
-    def get_color(pcc):
-        abs_pcc = abs(pcc)
-        if abs_pcc < 0.2:
-            return 'lightgray'  # very weak
-        elif abs_pcc < 0.4:
-            return 'lightblue'  # weak
-        elif abs_pcc < 0.6:
-            return 'skyblue'  # moderate
-        elif abs_pcc < 0.8:
-            return 'dodgerblue'  # strong
+        # Compute Spearman's rank correlation coefficient
+        correlation_spearman, p_value_spearman = spearmanr(avg_class_accuracies, class_level_distribution)
+        correlations_spearman.append(correlation_spearman)
+        p_values_spearman.append(p_value_spearman)
+
+    print()
+    print('-'*20)
+    print("PCC p-values:", p_values_pcc)
+    print("Spearman p-values:", p_values_spearman)
+    print('-'*20)
+    print()
+
+    # Define colors based on p-value significance for PCC
+    def get_color_pcc(p_value):
+        if p_value < 0.005:
+            return 'blue'  # Highly significant
+        elif p_value < 0.01:
+            return 'dodgerblue'  # Significant
+        elif p_value < 0.05:
+            return 'lightblue'  # Moderately significant
         else:
-            return 'blue'  # very strong
+            return 'lightgray'  # Not significant
 
-    colors = [get_color(corr) for corr in correlations]
+    colors_pcc = [get_color_pcc(p_val) for p_val in p_values_pcc]
+
+    # Define colors based on p-value significance for Spearman
+    def get_color_spearman(p_value):
+        if p_value < 0.001:
+            return 'darkgreen'  # Highly significant
+        elif p_value < 0.01:
+            return 'green'  # Significant
+        elif p_value < 0.05:
+            return 'lightgreen'  # Moderately significant
+        elif p_value < 0.1:
+            return 'yellowgreen'  # Marginally significant
+        else:
+            return 'lightgray'  # Not significant
+
+    colors_spearman = [get_color_spearman(p_val) for p_val in p_values_spearman]
 
     # Plot PCCs in a bar chart with horizontal lines
     plt.figure(figsize=(14, 8))
-    plt.bar(metric_abbreviations, correlations, color=colors)
+    plt.bar(metric_abbreviations, correlations_pcc, color=colors_pcc)
     plt.title('PCC Between Metrics and Class-Level Accuracies')
     plt.ylabel('Pearson Correlation Coefficient (PCC)')
     plt.xticks(rotation=45, ha='right')
@@ -384,10 +409,30 @@ def compare_metrics_to_class_accuracies(class_distributions, avg_class_accuracie
 
     plt.tight_layout()
 
-    # Ensure the output directory exists
-    output_dir = 'pcc_plots'
-    os.makedirs(output_dir, exist_ok=True)
-    plt.savefig(os.path.join(output_dir, output_filename))
+    plt.savefig(os.path.join(u.CORRELATIONS_SAVE_DIR, pcc_output_filename))
+    plt.close()
+
+    # Plot Spearman's correlations in a separate bar chart
+    plt.figure(figsize=(14, 8))
+    plt.bar(metric_abbreviations, correlations_spearman, color=colors_spearman)
+    plt.title('Spearman Rank Correlation Between Metrics and Class-Level Accuracies')
+    plt.ylabel('Spearman Rank Correlation Coefficient')
+    plt.xticks(rotation=45, ha='right')
+
+    # Add horizontal lines for better readability
+    plt.axhline(0, color='black', linewidth=0.5)
+    plt.axhline(0.2, color='gray', linestyle='--', linewidth=0.5)
+    plt.axhline(-0.2, color='gray', linestyle='--', linewidth=0.5)
+    plt.axhline(0.4, color='gray', linestyle='--', linewidth=0.5)
+    plt.axhline(-0.4, color='gray', linestyle='--', linewidth=0.5)
+    plt.axhline(0.6, color='gray', linestyle='--', linewidth=0.5)
+    plt.axhline(-0.6, color='gray', linestyle='--', linewidth=0.5)
+    plt.axhline(0.8, color='gray', linestyle='--', linewidth=0.5)
+    plt.axhline(-0.8, color='gray', linestyle='--', linewidth=0.5)
+
+    plt.tight_layout()
+
+    plt.savefig(os.path.join(u.CORRELATIONS_SAVE_DIR, spearman_output_filename))
     plt.close()
 
 
@@ -423,7 +468,6 @@ def compute_class_averages_of_metrics(metrics, labels):
 
 def compute_correlation_heatmaps(easy_distribution, hard_distribution, threshold, output_dir="heatmaps"):
     num_metrics = len(easy_distribution)
-    print(num_metrics)
 
     easy_overlap = np.zeros((num_metrics, num_metrics))
     hard_overlap = np.zeros((num_metrics, num_metrics))
@@ -505,103 +549,173 @@ def compute_easy_hard_ratios(dataset_name: str, easy_indices: List[np.ndarray], 
     print(df.to_string(index=False))
 
 
-def main(dataset_name: str, models_count: int, threshold: float):
+def plot_correlation_metrics(metric_abbreviations, iou_values, spearman_values, kendall_values, output_filename):
+    """
+    Plot IoU, Spearman's, and Kendall's Tau for each metric.
+
+    :param metric_abbreviations: List of abbreviations for each metric.
+    :param iou_values: List of IoU values for each metric.
+    :param spearman_values: List of Spearman's correlations for each metric.
+    :param kendall_values: List of Kendall's Tau correlations for each metric.
+    :param output_filename: The filename for saving the plot.
+    """
+    num_metrics = len(metric_abbreviations)
+    x = range(num_metrics)
+
+    plt.figure(figsize=(14, 8))
+
+    # Plot IoU
+    plt.bar(x, iou_values, width=0.2, label='IoU', color='lightblue', align='center')
+
+    # Plot Spearman's
+    plt.bar([i + 0.2 for i in x], spearman_values, width=0.2, label="Spearman's", color='lightgreen', align='center')
+
+    # Plot Kendall's Tau
+    plt.bar([i + 0.4 for i in x], kendall_values, width=0.2, label="Kendall's Tau", color='lightcoral', align='center')
+
+    plt.xticks(x, metric_abbreviations, rotation=45, ha='right')
+    plt.title('Comparison of IoU, Spearman’s, and Kendall’s Tau Across Metrics')
+    plt.ylabel('Correlation / Overlap Value')
+    plt.legend()
+    plt.tight_layout()
+
+    plt.savefig(output_filename)
+    plt.close()
+
+
+def compute_iou(adaptive_indices, full_indices):
+    """
+    Compute the IoU (Intersection Over Union) of samples from adaptive_indices and full_indices.
+
+    :param adaptive_indices: List of indices for the adaptive set.
+    :param full_indices: List of indices for the full set.
+    :return: IoU value as a percentage.
+    """
+    adaptive_set = set(adaptive_indices)
+    full_set = set(full_indices)
+    overlap_count = len(adaptive_set.intersection(full_set))
+    iou = (overlap_count / len(adaptive_set)) * 100
+    return iou
+
+
+def main(dataset_name: str, models_count: int, training: str, threshold: float):
     # Define file paths for saving and loading cached results
-    accuracies_file = f"{u.HARD_IMBALANCE_DIR}{dataset_name}_avg_class_accuracies.npy"
+    accuracies_file = f"{u.HARD_IMBALANCE_DIR}full{dataset_name}_avg_class_accuracies.npy"
     proximity_file = f"{u.HARD_IMBALANCE_DIR}{dataset_name}_proximity_indicators.pkl"
     curvatures_file = f"{u.HARD_IMBALANCE_DIR}{dataset_name}_curvature_indicators.pkl"
-    disjuncts_file = f"{u.HARD_IMBALANCE_DIR}{dataset_name}_disjuncts_indicators.pkl"
 
     # Load the dataset (full for proximity_indicators, and official training+test splits for ratio)
-    dataset = u.load_full_data_and_normalize(dataset_name)
-    labels = dataset.tensors[1].numpy()
-    num_classes = len(np.unique(labels))
+    if training == 'full':
+        training_dataset = u.load_full_data_and_normalize(dataset_name)
+    else:
+        training_dataset, _ = u.load_data_and_normalize(dataset_name)
+    training_labels = training_dataset.tensors[1].numpy()
+    num_classes = len(np.unique(training_labels))
+    metric_abbreviations = [
+        'SCD', 'OCD', 'CR', 'CSC', 'COC', 'CDR',
+        'ASD', 'AOD', 'AAD', 'ADR', 'PSK',
+        'POK', 'ASC', 'AOC', 'AAC', 'GC',
+        'MC'
+    ]
 
     if os.path.exists(accuracies_file):
         print('Loading accuracies.')
         avg_class_accuracies = np.load(accuracies_file)
     else:
-        print('Computing accuracies.')
-        trainer = EnsembleTrainer(dataset_name, models_count, save=True)
-        loader = DataLoader(dataset, batch_size=32, shuffle=True)
-        trainer.train_ensemble(loader, loader)
+        raise Exception('Train an ensemble via `train_ensembles.py --training full` before running this program.')
+    loader = DataLoader(training_dataset, batch_size=len(training_dataset), shuffle=False)
+    if os.path.exists(curvatures_file):
+        print('Loading curvatures.')
+        gaussian_curvatures, mean_curvatures = u.load_data(curvatures_file)
+    else:
+        print('Calculating curvatures.')
+        gaussian_curvatures, mean_curvatures = compute_curvatures(loader)
+        u.save_data((gaussian_curvatures, mean_curvatures), curvatures_file)
 
-        # Compute average class-level accuracies
-        class_accuracies = np.zeros((models_count, num_classes))
-        for model_idx, model in enumerate(trainer.get_trained_models()):
-            class_accuracies[model_idx] = u.class_level_test(model, loader, num_classes)
-        avg_class_accuracies = class_accuracies.mean(axis=0)
-        np.save(accuracies_file, avg_class_accuracies)
-    if u.DEVICE.type == 'cpu':
-        loader = DataLoader(dataset, batch_size=len(dataset), shuffle=False)
-        if os.path.exists(curvatures_file):
-            print('Loading curvatures.')
-            gaussian_curvatures, mean_curvatures = u.load_data(curvatures_file)
-        else:
-            print('Calculating curvatures.')
-            gaussian_curvatures, mean_curvatures = compute_curvatures(loader)
-            u.save_data((gaussian_curvatures, mean_curvatures), curvatures_file)
+    if os.path.exists(proximity_file):
+        print('Loading proximities.')
+        proximity_metrics = u.load_data(proximity_file)
+    else:
+        print('Calculating proximities.')
+        proximity_metrics = compute_proximity_metrics(loader, gaussian_curvatures)
+        u.save_data(proximity_metrics, proximity_file)
 
-        if os.path.exists(proximity_file):
-            print('Loading proximities.')
-            proximity_metrics = u.load_data(proximity_file)
-        else:
-            print('Calculating proximities.')
-            proximity_metrics = compute_proximity_metrics(loader, gaussian_curvatures)
-            u.save_data(proximity_metrics, proximity_file)
+    gaussian_curvatures = [abs(gc) for gc in gaussian_curvatures]  # large negative curvature also makes sample hard
+    all_metrics = proximity_metrics + (gaussian_curvatures, mean_curvatures)
+    class_averages = compute_class_averages_of_metrics(all_metrics, training_labels)
+    invert_metrics = [False, True, False, False, True, False, False, True, False, False, True, False, False, False,
+                      False, False, False]
 
-        if os.path.exists(disjuncts_file):
-            print('Loading disjuncts.')
-            disjunct_metrics = u.load_data(disjuncts_file)
-        else:
-            print('Calculating disjuncts.')
-            disjunct_metrics = compute_disjuncts(loader)
-            u.save_data(disjunct_metrics, disjuncts_file)
+    # Extract the hardest samples for each metric and compute their class distributions
+    adaptive_easy_indices, adaptive_hard_indices, adaptive_easy_distributions, adaptive_hard_distributions, \
+        fixed_easy_indices, fixed_hard_indices, fixed_easy_distributions, fixed_hard_distributions = (
+        extract_extreme_samples_threshold(all_metrics, training_labels, dataset_name, invert_metrics))
 
-        gaussian_curvatures = [abs(gc) for gc in gaussian_curvatures]
-        # Combine proximity metrics, curvature metrics, and disjunct metrics
-        all_metrics = proximity_metrics + (gaussian_curvatures, mean_curvatures)
+    # Compute and visualize the correlation heatmaps
+    compute_correlation_heatmaps(adaptive_easy_indices, adaptive_hard_indices, 'adaptive')
+    compute_correlation_heatmaps(fixed_easy_indices, fixed_hard_indices, 'fixed')
 
-        class_averages = compute_class_averages_of_metrics(all_metrics, labels)
-
-        invert_metrics = [False, True, False, False, True, False, False, True, False, False, True, False, False, False,
-                          False, False, False]
-
-        # Extract the hardest samples for each metric and compute their class distributions
-        adaptive_easy_indices, adaptive_hard_indices, adaptive_easy_distributions, adaptive_hard_distributions, \
-            fixed_easy_indices, fixed_hard_indices, fixed_easy_distributions, fixed_hard_distributions = (
-            extract_extreme_samples_threshold(all_metrics, labels, dataset_name, invert_metrics))
-
-        # Compute and visualize the correlation heatmaps
-        compute_correlation_heatmaps(adaptive_easy_indices, adaptive_hard_indices, 'adaptive')
-        compute_correlation_heatmaps(fixed_easy_indices, fixed_hard_indices, 'fixed')
-
-        # Find the hardest and easiest classes, analyze hard sample distribution and visualize results
-        hardest_class = np.argmin(avg_class_accuracies)
-        easiest_class = np.argmax(avg_class_accuracies)
-        print(f"\nHardest class accuracy (class {hardest_class}): {avg_class_accuracies[hardest_class]:.5f}%")
-        print(f"Easiest class accuracy (class {easiest_class}): {avg_class_accuracies[easiest_class]:.5f}%")
-
+    if training == 'full':
         # Compare and plot all metrics against class-level accuracies
         compare_metrics_to_class_accuracies(adaptive_easy_distributions, avg_class_accuracies, num_classes,
-                                            f'{dataset_name}_adaptive_easyPCC.pdf')
+                                            f'{dataset_name}_adaptive_easyPCC.pdf',
+                                            f'{dataset_name}_adaptive_easySRC.pdf')
         compare_metrics_to_class_accuracies(adaptive_hard_distributions, avg_class_accuracies, num_classes,
-                                            f'{dataset_name}_adaptive_hardPCC.pdf')
+                                            f'{dataset_name}_adaptive_hardPCC.pdf',
+                                            f'{dataset_name}_adaptive_hardSRC.pdf')
         compare_metrics_to_class_accuracies(fixed_easy_distributions, avg_class_accuracies, num_classes,
-                                            f'{dataset_name}_fixed_easyPCC.pdf')
+                                            f'{dataset_name}_fixed_easyPCC.pdf',
+                                            f'{dataset_name}_fixed_easySRC.pdf')
         compare_metrics_to_class_accuracies(fixed_hard_distributions, avg_class_accuracies, num_classes,
-                                            f'{dataset_name}_fixed_hardPCC.pdf')
+                                            f'{dataset_name}_fixed_hardPCC.pdf',
+                                            f'{dataset_name}_fixed_hardSRC.pdf')
         compare_metrics_to_class_accuracies(class_averages, avg_class_accuracies, num_classes,
-                                            f'{dataset_name}_avgPCC.pdf')
-
+                                            f'{dataset_name}_avgPCC.pdf',
+                                            f'{dataset_name}_avgSRC.pdf')
         compute_easy_hard_ratios(dataset_name, adaptive_easy_indices, adaptive_hard_indices)
-
-        u.save_data(adaptive_easy_indices, f'{u.DIVISIONS_SAVE_DIR}/{dataset_name}_adaptive_easy_indices.pkl')
-        u.save_data(adaptive_hard_indices, f'{u.DIVISIONS_SAVE_DIR}/{dataset_name}_adaptive_hard_indices.pkl')
-        u.save_data(fixed_easy_indices, f'{u.DIVISIONS_SAVE_DIR}/{dataset_name}_fixed_easy_indices.pkl')
-        u.save_data(fixed_hard_indices, f'{u.DIVISIONS_SAVE_DIR}/{dataset_name}_fixed_hard_indices.pkl')
     else:
-        raise Exception('Afaik kNN is not faster on GPUs so there is no running it on them.')
+        full_easy_indices = u.load_data(f'{u.DIVISIONS_SAVE_DIR}/full{dataset_name}_adaptive_easy_indices.pkl')
+        full_hard_indices = u.load_data(f'{u.DIVISIONS_SAVE_DIR}/full{dataset_name}_adaptive_hard_indices.pkl')
+
+        iou_values_easy = []
+        iou_values_hard = []
+        spearman_values_easy = []
+        spearman_values_hard = []
+        kendall_values_easy = []
+        kendall_values_hard = []
+
+        for metric_idx, (adaptive_easy, adaptive_hard) in enumerate(zip(adaptive_easy_indices, adaptive_hard_indices)):
+            # Compute IoU
+            easy_iou = compute_iou(adaptive_easy, full_easy_indices[metric_idx])
+            hard_iou = compute_iou(adaptive_hard, full_hard_indices[metric_idx])
+
+            iou_values_easy.append(easy_iou)
+            iou_values_hard.append(hard_iou)
+
+            # Compute Spearman's
+            easy_spearman, _ = spearmanr(adaptive_easy, full_easy_indices[metric_idx])
+            hard_spearman, _ = spearmanr(adaptive_hard, full_hard_indices[metric_idx])
+
+            spearman_values_easy.append(easy_spearman)
+            spearman_values_hard.append(hard_spearman)
+
+            # Compute Kendall's Tau
+            easy_kendall, _ = kendalltau(adaptive_easy, full_easy_indices[metric_idx])
+            hard_kendall, _ = kendalltau(adaptive_hard, full_hard_indices[metric_idx])
+
+            kendall_values_easy.append(easy_kendall)
+            kendall_values_hard.append(hard_kendall)
+
+        # Call the plotting function
+        plot_correlation_metrics(metric_abbreviations, iou_values_easy, spearman_values_easy, kendall_values_easy,
+                                 f'{dataset_name}_easy_correlations.pdf')
+        plot_correlation_metrics(metric_abbreviations, iou_values_hard, spearman_values_hard, kendall_values_hard,
+                                 f'{dataset_name}_hard_correlations.pdf')
+
+    u.save_data(adaptive_easy_indices, f'{u.DIVISIONS_SAVE_DIR}/{training}{dataset_name}_adaptive_easy_indices.pkl')
+    u.save_data(adaptive_hard_indices, f'{u.DIVISIONS_SAVE_DIR}/{training}{dataset_name}_adaptive_hard_indices.pkl')
+    u.save_data(fixed_easy_indices, f'{u.DIVISIONS_SAVE_DIR}/{training}{dataset_name}_fixed_easy_indices.pkl')
+    u.save_data(fixed_hard_indices, f'{u.DIVISIONS_SAVE_DIR}/{training}{dataset_name}_fixed_hard_indices.pkl')
 
 
 if __name__ == '__main__':
@@ -612,6 +726,9 @@ if __name__ == '__main__':
     parser.add_argument('--dataset_name', type=str, default='MNIST',
                         help='Name of the dataset (MNIST, CIFAR10, CIFAR100).')
     parser.add_argument('--models_count', type=int, default=20, help='Number of models in the ensemble.')
+    parser.add_argument('--training', type=str, choices=['full', 'part'], default='full',
+                        help='Indicates which models to choose for evaluations - the ones trained on the entire dataset '
+                             '(full), or the ones trained only on the training set (part).')
     parser.add_argument('--threshold', type=float, default=0.1,
                         help='The percentage of the most extreme (hardest) samples that will be considered as hard.')
     args = parser.parse_args()

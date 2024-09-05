@@ -21,8 +21,9 @@ DATA_SAVE_DIR = "data/"
 MODEL_SAVE_DIR = "models/"
 ACCURACIES_SAVE_DIR = "accuracies/"
 DIVISIONS_SAVE_DIR = 'dataset_divisions/'
+CORRELATIONS_SAVE_DIR = 'correlations/'
 for directory in [HARD_IMBALANCE_DIR, CONFIDENCES_SAVE_DIR, DATA_SAVE_DIR, MODEL_SAVE_DIR, ACCURACIES_SAVE_DIR,
-                  DIVISIONS_SAVE_DIR]:
+                  DIVISIONS_SAVE_DIR, CORRELATIONS_SAVE_DIR]:
     os.makedirs(directory, exist_ok=True)
 
 

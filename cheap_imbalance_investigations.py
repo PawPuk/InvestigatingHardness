@@ -139,18 +139,18 @@ def plot_error_rates(accuracies: List[dict]) -> None:
 
 
 
-def main(dataset_name: str, models_count: int):
+def main(dataset_name: str, models_count: int, training: str):
     """Main function to load the hard/easy indices and pre-trained models, and test on dataset."""
 
     # Load necessary data
-    easy_indices = u.load_data(f'{u.DIVISIONS_SAVE_DIR}/{dataset_name}_easy_indices.pkl')
-    hard_indices = u.load_data(f'{u.DIVISIONS_SAVE_DIR}/{dataset_name}_hard_indices.pkl')
+    easy_indices = u.load_data(f'{u.DIVISIONS_SAVE_DIR}/{dataset_name}_adaptive_easy_indices.pkl')
+    hard_indices = u.load_data(f'{u.DIVISIONS_SAVE_DIR}/{dataset_name}_adaptive_hard_indices.pkl')
     models = []
 
     # Load models
     for i in range(models_count):
         model = LeNet().to(u.DEVICE)
-        model_file = f"{u.MODEL_SAVE_DIR}{dataset_name}_{models_count}_ensemble_{i}.pth"
+        model_file = f"{u.MODEL_SAVE_DIR}{training}{dataset_name}_{models_count}_ensemble_{i}.pth"
         model.load_state_dict(torch.load(model_file, map_location=u.DEVICE))
         models.append(model)
 
@@ -178,8 +178,11 @@ if __name__ == "__main__":
     parser.add_argument("--dataset_name", type=str, default='MNIST',
                         help="Name of the dataset (e.g., MNIST, CIFAR10, etc.)")
     parser.add_argument("--models_count", type=int, default='100', help="Number of models in the ensemble")
+    parser.add_argument('--training', type=str, choices=['full', 'part'], default='full',
+                        help='Indicates which models to choose for evaluations - the ones trained on the entire dataset '
+                             '(full), or the ones trained only on the training set (part).')
 
     args = parser.parse_args()
 
     # Call the main function with the parsed arguments
-    main(args.dataset_name, args.models_count)
+    main(args.dataset_name, args.models_count, args.training)
