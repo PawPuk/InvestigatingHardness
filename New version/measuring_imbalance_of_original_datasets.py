@@ -1,7 +1,7 @@
 import argparse
 from collections import defaultdict
 import os
-from typing import List, Dict, Tuple
+from typing import List, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -22,7 +22,7 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed_all(42)
 
 
-def detect_family(normalized_metric: np.ndarray, avg_gradients: List[float], second_derivatives: List[float]):
+def detect_family(normalized_metric: np.ndarray, avg_gradients: List[float]):
     if is_first_family_metric(avg_gradients):
         return 1
     elif is_second_family_metric(normalized_metric, avg_gradients):
@@ -216,7 +216,7 @@ def extract_extreme_samples_via_hard_threshold(metrics: List[List[float]], label
     return class_distributions, extreme_indices
 
 def extract_extreme_samples_via_soft_threshold(metrics: List[List[float]], labels: List[int], dataset_name: str,
-                                               invert: List[bool]) -> Tuple[List[int], List[int], List[Dict[int, int]], List[Dict[int, int]]]:
+                                               invert: List[bool]):
     """Extract easy and hard samples based on the division points and invert logic, returning their indices and distributions."""
     num_metrics = len(metrics)
     easy_samples = []
@@ -260,7 +260,7 @@ def extract_extreme_samples_via_soft_threshold(metrics: List[List[float]], label
 
         # Detect family and find division points
         first_division_point, second_division_point = None, None
-        family = detect_family(sorted_normalized_metric, avg_gradients, second_derivatives)
+        family = detect_family(sorted_normalized_metric, avg_gradients)
         print(f'Metric {metric_idx + 1} is of family {family}.')
         if family == 1:
             first_division_point, second_division_point = find_division_points_for_first_family(second_derivatives)
@@ -432,7 +432,6 @@ def compute_correlation_heatmaps(easy_distribution, hard_distribution, output_di
     plt.colorbar()
     plt.title("Easy Samples Overlap Heatmap")
     plt.savefig(os.path.join(output_dir, "easy_overlap_heatmap.pdf"))
-    plt.show()
     plt.close()
 
     plt.figure(figsize=(10, 8))
@@ -440,7 +439,6 @@ def compute_correlation_heatmaps(easy_distribution, hard_distribution, output_di
     plt.colorbar()
     plt.title("Hard Samples Overlap Heatmap")
     plt.savefig(os.path.join(output_dir, "hard_overlap_heatmap.pdf"))
-    plt.show()
     plt.close()
 
 
@@ -514,9 +512,9 @@ def main(dataset_name: str, models_count: int, threshold: float):
         avg_class_accuracies = np.load(accuracies_file)
     else:
         print('Computing accuracies.')
-        trainer = EnsembleTrainer(dataset_name, models_count)
+        trainer = EnsembleTrainer(dataset_name, models_count, save=True)
         loader = DataLoader(dataset, batch_size=32, shuffle=True)
-        trainer.train_ensemble(loader)
+        trainer.train_ensemble(loader, loader)
 
         # Compute average class-level accuracies
         class_accuracies = np.zeros((models_count, num_classes))
@@ -524,71 +522,76 @@ def main(dataset_name: str, models_count: int, threshold: float):
             class_accuracies[model_idx] = u.class_level_test(model, loader, num_classes)
         avg_class_accuracies = class_accuracies.mean(axis=0)
         np.save(accuracies_file, avg_class_accuracies)
+    if u.DEVICE.type == 'cpu':
+        loader = DataLoader(dataset, batch_size=len(dataset), shuffle=False)
+        if os.path.exists(curvatures_file):
+            print('Loading curvatures.')
+            gaussian_curvatures, mean_curvatures = u.load_data(curvatures_file)
+        else:
+            print('Calculating curvatures.')
+            gaussian_curvatures, mean_curvatures = compute_curvatures(loader)
+            u.save_data((gaussian_curvatures, mean_curvatures), curvatures_file)
 
-    loader = DataLoader(dataset, batch_size=len(dataset), shuffle=False)
-    if os.path.exists(curvatures_file):
-        print('Loading curvatures.')
-        gaussian_curvatures, mean_curvatures = u.load_data(curvatures_file)
+        if os.path.exists(proximity_file):
+            print('Loading proximities.')
+            proximity_metrics = u.load_data(proximity_file)
+        else:
+            print('Calculating proximities.')
+            proximity_metrics = compute_proximity_metrics(loader, gaussian_curvatures)
+            u.save_data(proximity_metrics, proximity_file)
+
+        if os.path.exists(disjuncts_file):
+            print('Loading disjuncts.')
+            disjunct_metrics = u.load_data(disjuncts_file)
+        else:
+            print('Calculating disjuncts.')
+            disjunct_metrics = compute_disjuncts(loader)
+            u.save_data(disjunct_metrics, disjuncts_file)
+
+        gaussian_curvatures = [abs(gc) for gc in gaussian_curvatures]
+        # Combine proximity metrics, curvature metrics, and disjunct metrics
+        all_metrics = proximity_metrics + (gaussian_curvatures, mean_curvatures)
+
+        class_averages = compute_class_averages_of_metrics(all_metrics, labels)
+
+        invert_metrics = [False, True, False, False, True, False, False, True, False, False, True, False, False, False,
+                          False, False, False]
+
+        # Extract the hardest samples for each metric and compute their class distributions
+        easy_indices, hard_indices, easy_distribution, hard_distribution = (
+            extract_extreme_samples_via_soft_threshold(all_metrics, labels, dataset_name, invert_metrics))
+
+        print(hard_distribution)
+
+        print()
+        print('-'*20)
+        print()
+
+        print(easy_distribution)
+
+        # Compute and visualize the correlation heatmaps
+        compute_correlation_heatmaps(easy_indices, hard_indices)
+
+        # Find the hardest and easiest classes, analyze hard sample distribution and visualize results
+        hardest_class = np.argmin(avg_class_accuracies)
+        easiest_class = np.argmax(avg_class_accuracies)
+        print(f"\nHardest class accuracy (class {hardest_class}): {avg_class_accuracies[hardest_class]:.5f}%")
+        print(f"Easiest class accuracy (class {easiest_class}): {avg_class_accuracies[easiest_class]:.5f}%")
+
+        # Compare and plot all metrics against class-level accuracies
+        compare_metrics_to_class_accuracies(easy_distribution, avg_class_accuracies, num_classes,
+                                            f'{dataset_name}_easyPCC.pdf')
+        compare_metrics_to_class_accuracies(hard_distribution, avg_class_accuracies, num_classes,
+                                            f'{dataset_name}_hardPCC.pdf')
+        compare_metrics_to_class_accuracies(class_averages, avg_class_accuracies, num_classes,
+                                            f'{dataset_name}_avgPCC.pdf')
+
+        compute_easy_hard_ratios(dataset_name, easy_indices, hard_indices)
+
+        u.save_data(easy_indices, f'{u.DIVISIONS_SAVE_DIR}/{dataset_name}_easy_indices.pkl')
+        u.save_data(hard_indices, f'{u.DIVISIONS_SAVE_DIR}/{dataset_name}_hard_indices.pkl')
     else:
-        print('Calculating curvatures.')
-        gaussian_curvatures, mean_curvatures = compute_curvatures(loader)
-        u.save_data((gaussian_curvatures, mean_curvatures), curvatures_file)
-
-    if os.path.exists(proximity_file):
-        print('Loading proximities.')
-        proximity_metrics = u.load_data(proximity_file)
-    else:
-        print('Calculating proximities.')
-        proximity_metrics = compute_proximity_metrics(loader, gaussian_curvatures)
-        u.save_data(proximity_metrics, proximity_file)
-
-    if os.path.exists(disjuncts_file):
-        print('Loading disjuncts.')
-        disjunct_metrics = u.load_data(disjuncts_file)
-    else:
-        print('Calculating disjuncts.')
-        disjunct_metrics = compute_disjuncts(loader)
-        u.save_data(disjunct_metrics, disjuncts_file)
-
-    gaussian_curvatures = [abs(gc) for gc in gaussian_curvatures]
-    # Combine proximity metrics, curvature metrics, and disjunct metrics
-    all_metrics = proximity_metrics + (gaussian_curvatures, mean_curvatures)
-
-    class_averages = compute_class_averages_of_metrics(all_metrics, labels)
-
-    invert_metrics = [False, True, False, False, True, False, False, True, False, False, True, False, False, False,
-                      False, False, False]
-
-    # Extract the hardest samples for each metric and compute their class distributions
-    easy_indices, hard_indices, easy_distribution, hard_distribution = (
-        extract_extreme_samples_via_soft_threshold(all_metrics, labels, dataset_name, invert_metrics))
-
-    print(hard_distribution)
-
-    print()
-    print('-'*20)
-    print()
-
-    print(easy_distribution)
-
-    # Compute and visualize the correlation heatmaps
-    # compute_correlation_heatmaps(easy_indices, hard_indices)
-
-    # Find the hardest and easiest classes, analyze hard sample distribution and visualize results
-    hardest_class = np.argmin(avg_class_accuracies)
-    easiest_class = np.argmax(avg_class_accuracies)
-    print(f"\nHardest class accuracy (class {hardest_class}): {avg_class_accuracies[hardest_class]:.5f}%")
-    print(f"Easiest class accuracy (class {easiest_class}): {avg_class_accuracies[easiest_class]:.5f}%")
-
-    # Compare and plot all metrics against class-level accuracies
-    compare_metrics_to_class_accuracies(easy_distribution, avg_class_accuracies, num_classes,
-                                        f'{dataset_name}_easyPCC.pdf')
-    compare_metrics_to_class_accuracies(hard_distribution, avg_class_accuracies, num_classes,
-                                        f'{dataset_name}_hardPCC.pdf')
-    compare_metrics_to_class_accuracies(class_averages, avg_class_accuracies, num_classes,
-                                        f'{dataset_name}_avgPCC.pdf')
-
-    compute_easy_hard_ratios(dataset_name, easy_indices, hard_indices)
+        raise Exception('Afaik kNN is not faster on GPUs so there is no running it on them.')
 
 
 if __name__ == '__main__':

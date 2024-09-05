@@ -20,7 +20,9 @@ CONFIDENCES_SAVE_DIR = "confidences/"
 DATA_SAVE_DIR = "data/"
 MODEL_SAVE_DIR = "models/"
 ACCURACIES_SAVE_DIR = "accuracies/"
-for directory in [HARD_IMBALANCE_DIR, CONFIDENCES_SAVE_DIR, DATA_SAVE_DIR, MODEL_SAVE_DIR, ACCURACIES_SAVE_DIR]:
+DIVISIONS_SAVE_DIR = 'dataset_divisions/'
+for directory in [HARD_IMBALANCE_DIR, CONFIDENCES_SAVE_DIR, DATA_SAVE_DIR, MODEL_SAVE_DIR, ACCURACIES_SAVE_DIR,
+                  DIVISIONS_SAVE_DIR]:
     os.makedirs(directory, exist_ok=True)
 
 

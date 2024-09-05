@@ -35,8 +35,9 @@ class EnsembleTrainer:
             self.models.append(model)
             # Save model state
             if self.save:
-                torch.save(model.state_dict(),
-                           f"{u.MODEL_SAVE_DIR}{self.dataset_name}_{self.models_count}_{imbalanced_ratio}_ensemble_{i}.pth",
+
+                torch.save(model.state_dict(), f"{u.MODEL_SAVE_DIR}{['part, full'][train_loader == test_loader]}"
+                                               f"{self.dataset_name}_{self.models_count}_ensemble_{i}.pth",
                            _use_new_zipfile_serialization=False)  # Ensuring backward compatibility
             # Evaluate on the training set
             if test_loader is not None:
