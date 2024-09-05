@@ -43,7 +43,7 @@ def test_model_on_samples(model: torch.nn.Module, loader: DataLoader, device: to
     correct = (np.argmax(selected_outputs, axis=1) == selected_targets).sum()
     total = selected_targets.shape[0]
 
-    accuracy = 100 * correct / total if total > 0 else None  # Using None, as this should not occur.
+    accuracy = correct / total if total > 0 else None  # Using None, as this should not occur.
     return accuracy
 
 
@@ -62,7 +62,7 @@ def test_ensemble(models: List[torch.nn.Module], loader: DataLoader, device: tor
         easy_accuracies = []
         hard_accuracies = []
 
-        for model in models[:3]:
+        for model in models:
             acc_all = test_model_on_samples(model, loader, device, list(range(dataset_size)), dataset_size, test_size)
             acc_easy = test_model_on_samples(model, loader, device, metric_easy_indices, dataset_size, test_size)
             acc_hard = test_model_on_samples(model, loader, device, metric_hard_indices, dataset_size, test_size)
@@ -90,6 +90,7 @@ def plot_error_rates(accuracies: List[dict]) -> None:
 
     num_metrics = len(accuracies)
     indices = np.arange(1, num_metrics + 1)  # Indices for each metric
+    max_error_rate = 0
 
     # Calculate epsilon based on the number of metrics and plot width
     epsilon = 0.1  # Adjust epsilon to control the spacing between lines for each metric
@@ -102,9 +103,11 @@ def plot_error_rates(accuracies: List[dict]) -> None:
         metric_idx = acc['metric_idx']
 
         # Compute error rates (since error rate = 100% - accuracy)
-        error_all = 100 - acc['mean_acc_all']
-        error_easy = 100 - acc['mean_acc_easy']
-        error_hard = 100 - acc['mean_acc_hard']
+        error_all = 1 - acc['mean_acc_all']
+        error_easy = 1 - acc['mean_acc_easy']
+        error_hard = 1 - acc['mean_acc_hard']
+
+        max_error_rate = max(max_error_rate, error_all, error_easy, error_hard)
 
         # Plot vertical line segments using Line2D for all, easy, and hard samples
         ax.add_line(Line2D([metric_idx - epsilon, metric_idx + epsilon], [error_easy, error_easy],
@@ -114,6 +117,9 @@ def plot_error_rates(accuracies: List[dict]) -> None:
         ax.add_line(Line2D([metric_idx - epsilon, metric_idx + epsilon], [error_hard, error_hard],
                            color='red', linewidth=5))  # Red for hard
 
+    # Calculate ylim based on the max error rate with an epsilon margin (10% of max error rate)
+    epsilon_y = 0.1 * max_error_rate
+    ax.set_ylim(0, max_error_rate + epsilon_y)
     # Labeling and formatting
     ax.set_xticks(indices)
     ax.set_xticklabels([f'{acc["metric_idx"]}' for acc in accuracies])
@@ -127,6 +133,8 @@ def plot_error_rates(accuracies: List[dict]) -> None:
 
     # Show the plot
     plt.tight_layout()
+    plt.savefig('hardness_based_imbalances.pdf')
+    plt.savefig('hardness_based_imbalances.png')
     plt.show()
 
 
