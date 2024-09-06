@@ -23,9 +23,12 @@ class EnsembleTrainer:
         self.save = save
         self.models = []
 
-    def train_ensemble(self, train_loader: DataLoader, test_loader: DataLoader):
+    def train_ensemble(self, train_loader: DataLoader, test_loader: DataLoader, training: str):
         """Train an ensemble of models on the full dataset."""
-
+        if training == 'full':
+            print('Training an ensemble of networks in `full information` scenario')
+        else:
+            print('Training an ensemble of networks in `partial information` scenario')
         for i in tqdm(range(self.models_count)):
             model = LeNet().to(u.DEVICE)
             optimizer = Adam(model.parameters(), lr=0.001)
@@ -34,14 +37,14 @@ class EnsembleTrainer:
             self.models.append(model)
             # Save model state
             if self.save:
-                torch.save(model.state_dict(), f"{u.MODEL_SAVE_DIR}{['part', 'full'][train_loader == test_loader]}"
+                torch.save(model.state_dict(), f"{u.MODEL_SAVE_DIR}{training}"
                                                f"{self.dataset_name}_{self.models_count}_ensemble_{i}.pth",
                            _use_new_zipfile_serialization=False)  # Ensuring backward compatibility
             # Evaluate on the training set
             accuracy = u.test(model, test_loader)
             print(f'Model {i} finished training, achieving accuracy of {accuracy}% on the test set.')
 
-        if train_loader == test_loader:
+        if training == 'full':
             # Compute and save the average class-level accuracies
             num_classes = len(torch.unique(train_loader.dataset.tensors[1]))
             class_accuracies = np.zeros((self.models_count, num_classes))
@@ -71,7 +74,7 @@ def main(dataset_name: str, models_count: int, training: str):
         train_dataset, test_dataset = u.load_data_and_normalize(dataset_name)
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=1000, shuffle=False)
-    trainer.train_ensemble(train_loader, test_loader)
+    trainer.train_ensemble(train_loader, test_loader, training)
 
 
 if __name__ == '__main__':

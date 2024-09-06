@@ -600,7 +600,7 @@ def compute_iou(adaptive_indices, full_indices):
 
 def main(dataset_name: str, models_count: int, training: str, threshold: float):
     # Define file paths for saving and loading cached results
-    accuracies_file = f"{u.HARD_IMBALANCE_DIR}full{dataset_name}_avg_class_accuracies.npy"
+    accuracies_file = f"{u.HARD_IMBALANCE_DIR}{dataset_name}_avg_class_accuracies.pkl"
     proximity_file = f"{u.HARD_IMBALANCE_DIR}{dataset_name}_proximity_indicators.pkl"
     curvatures_file = f"{u.HARD_IMBALANCE_DIR}{dataset_name}_curvature_indicators.pkl"
 
@@ -620,7 +620,7 @@ def main(dataset_name: str, models_count: int, training: str, threshold: float):
 
     if os.path.exists(accuracies_file):
         print('Loading accuracies.')
-        avg_class_accuracies = np.load(accuracies_file)
+        avg_class_accuracies = u.load_data(accuracies_file)
     else:
         raise Exception('Train an ensemble via `train_ensembles.py --training full` before running this program.')
     loader = DataLoader(training_dataset, batch_size=len(training_dataset), shuffle=False)
