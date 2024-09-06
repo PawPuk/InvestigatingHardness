@@ -68,19 +68,16 @@ def load_full_data_and_normalize(dataset_name: str) -> TensorDataset:
                                                     transform=transforms.ToTensor())
     test_dataset = getattr(datasets, dataset_name)(root="./data", train=False, download=True,
                                                    transform=transforms.ToTensor())
-    if dataset_name == 'CIFAR10':
-        train_data = torch.tensor(train_dataset.data).permute(0, 3, 1, 2).float()
+    torch.manual_seed(42)
+    if dataset_name in ['CIFAR10', 'CIFAR100']:
+        train_data = torch.tensor(train_dataset.data).permute(0, 3, 1, 2).float()  # (N, H, W, C) -> (N, C, H, W)
         test_data = torch.tensor(test_dataset.data).permute(0, 3, 1, 2).float()
     else:
-        train_data = train_dataset.data.unsqueeze(1).float()
+        train_data = train_dataset.data.unsqueeze(1).float()  # Add channel dimension for MNIST/other datasets
         test_data = test_dataset.data.unsqueeze(1).float()
     # Concatenate train and test datasets
     full_data = torch.cat([train_data, test_data])
     full_targets = torch.cat([torch.tensor(train_dataset.targets), torch.tensor(test_dataset.targets)])
-    # Shuffle the combined dataset
-    np.random.seed(42)
-    shuffled_indices = np.random.permutation(len(full_data))
-    full_data, full_targets = full_data[torch.tensor(shuffled_indices)], full_targets[torch.tensor(shuffled_indices)]
     # Normalize the data
     data_means = torch.mean(full_data, dim=(0, 2, 3)) / 255.0
     data_vars = torch.sqrt(torch.var(full_data, dim=(0, 2, 3)) / 255.0 ** 2 + EPSILON)
@@ -90,8 +87,6 @@ def load_full_data_and_normalize(dataset_name: str) -> TensorDataset:
     return TensorDataset(normalized_subset_data, full_targets)
 
 
-from torch.utils.data import TensorDataset
-
 def load_data_and_normalize(dataset_name: str) -> Tuple[TensorDataset, TensorDataset]:
     """
     Load and normalize the dataset. Optionally, modify the dataset to be long-tailed for the training set.
@@ -99,31 +94,28 @@ def load_data_and_normalize(dataset_name: str) -> Tuple[TensorDataset, TensorDat
     :param dataset_name: name of the dataset to load. It has to be available in `torchvision.datasets`.
     :return: Two TensorDatasets - one for training data and another for test data.
     """
-    # Load the train and test datasets
-    train_dataset = getattr(datasets, dataset_name)(root="./data", train=True, download=True, transform=transforms.ToTensor())
-    test_dataset = getattr(datasets, dataset_name)(root="./data", train=False, download=True, transform=transforms.ToTensor())
-
-    # Convert datasets to Tensor format (Handle CIFAR differently due to data structure)
+    train_dataset = getattr(datasets, dataset_name)(root="./data", train=True, download=True,
+                                                    transform=transforms.ToTensor())
+    test_dataset = getattr(datasets, dataset_name)(root="./data", train=False, download=True,
+                                                   transform=transforms.ToTensor())
+    torch.manual_seed(42)
     if dataset_name in ['CIFAR10', 'CIFAR100']:
-        train_data = torch.tensor(train_dataset.data).permute(0, 3, 1, 2).float()  # (N, H, W, C) -> (N, C, H, W)
+        train_data = torch.tensor(train_dataset.data).permute(0, 3, 1, 2).float()
         test_data = torch.tensor(test_dataset.data).permute(0, 3, 1, 2).float()
     else:
-        train_data = train_dataset.data.unsqueeze(1).float()  # Add channel dimension for MNIST/other datasets
+        train_data = train_dataset.data.unsqueeze(1).float()
         test_data = test_dataset.data.unsqueeze(1).float()
 
     train_targets = torch.tensor(train_dataset.targets)
     test_targets = torch.tensor(test_dataset.targets)
 
-    # Compute mean and std on the training set for normalization
     data_means = torch.mean(train_data, dim=(0, 2, 3)) / 255.0
-    data_vars = torch.sqrt(torch.var(train_data, dim=(0, 2, 3)) / 255.0 ** 2 + 1e-5)
+    data_vars = torch.sqrt(torch.var(train_data, dim=(0, 2, 3)) / 255.0 ** 2 + EPSILON)
 
-    # Normalize both training and test data
     normalize_transform = transforms.Normalize(mean=data_means, std=data_vars)
     normalized_train_data = normalize_transform(train_data / 255.0)
     normalized_test_data = normalize_transform(test_data / 255.0)
 
-    # Return TensorDatasets
     return TensorDataset(normalized_train_data, train_targets), TensorDataset(normalized_test_data, test_targets)
 
 

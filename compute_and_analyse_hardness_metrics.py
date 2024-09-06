@@ -334,10 +334,9 @@ def compare_metrics_to_class_accuracies(class_distributions, avg_class_accuracie
     p_values_spearman = []
 
     metric_abbreviations = [
-        'SCD', 'OCD', 'CR', 'CSC', 'COC', 'CDR',
-        'ASD', 'AOD', 'AAD', 'ADR', 'PSK',
-        'POK', 'ASC', 'AOC', 'AAC', 'GC',
-        'MC'
+        'SameCentroidDist', 'OtherCentroidDist', 'CentroidDistRatio', 'Same1NN', 'Other1NN', '1NNRatio',
+        'AvgSame40NN', 'AvgOther40NN', 'AvgAll40NN', 'Avg40NNRatio', '40NNPercSame', '40NNPercOther',
+        'AvgSame40NNCurv', 'AvgOther40NNCurv', 'AvgAll40NNCurv', 'GaussCurv', 'MeanCurv'
     ]  # Abbreviations for each metric to keep plot readable.
 
     # Compute both PCC and Spearman for each metric
@@ -612,10 +611,9 @@ def main(dataset_name: str, models_count: int, training: str, threshold: float):
     training_labels = training_dataset.tensors[1].numpy()
     num_classes = len(np.unique(training_labels))
     metric_abbreviations = [
-        'SCD', 'OCD', 'CR', 'CSC', 'COC', 'CDR',
-        'ASD', 'AOD', 'AAD', 'ADR', 'PSK',
-        'POK', 'ASC', 'AOC', 'AAC', 'GC',
-        'MC'
+        'SameCentroidDist', 'OtherCentroidDist', 'CentroidDistRatio', 'Same1NNDist', 'Other1NNDist', '1NNRatioDist',
+        'AvgSame40NNDist', 'AvgOther40NNDist', 'AvgAll40NNDist', 'Avg40NNDistRatio', '40NNPercSame',
+        '40NNPercOther', 'AvgSame40NNCurv', 'AvgOther40NNCurv', 'AvgAll40NNCurv', 'GaussCurv', 'MeanCurv'
     ]
 
     if os.path.exists(accuracies_file):
