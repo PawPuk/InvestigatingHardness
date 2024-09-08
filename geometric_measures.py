@@ -164,12 +164,12 @@ class Proximity:
 
             # Closest distances to the same and other class samples + ratio
             if np.any(knn_labels == target.item()):
-                min_same_class_dist = np.min(knn_distances[knn_same_class_indices])
+                min_same_class_dist = np.min(knn_distances[knn_labels == target.item()])
             else:
                 min_same_class_dist = np.inf
 
-            if np.any(knn_other_class_indices):
-                min_other_class_dist = np.min(knn_distances[knn_same_class_indices])
+            if np.any(knn_labels != target.item()):
+                min_other_class_dist = np.min(knn_distances[knn_labels == target.item()])
             else:
                 min_other_class_dist = np.inf
 
@@ -178,10 +178,10 @@ class Proximity:
             closest_distance_ratios.append(min_same_class_dist / min_other_class_dist)
 
             # Average distances to same, other, and all samples in kNN
-            avg_same_dist = np.mean(knn_distances[knn_same_class_indices]) if np.any(
-                knn_same_class_indices) else np.inf
-            avg_other_dist = np.mean(knn_distances[knn_other_class_indices]) if np.any(
-                knn_other_class_indices) else np.inf
+            avg_same_dist = np.mean(knn_distances[knn_labels == target.item()]) if np.any(
+                knn_labels == target.item()) else np.inf
+            avg_other_dist = np.mean(knn_distances[knn_labels != target.item()]) if np.any(
+                knn_labels != target.item()) else np.inf
             avg_all_dist = np.mean(knn_distances)
 
             avg_same_class_distances.append(avg_same_dist)
@@ -190,8 +190,8 @@ class Proximity:
             avg_distance_ratios.append(avg_same_dist / avg_other_dist)
 
             # Compute the percentage of kNN samples from same and other classes
-            percentage_same_class_knn.append(np.sum(knn_same_class_indices) / self.k)
-            percentage_other_class_knn.append(np.sum(knn_other_class_indices) / self.k)
+            percentage_same_class_knn.append(np.sum(knn_labels == target.item()) / self.k)
+            percentage_other_class_knn.append(np.sum(knn_labels != target.item()) / self.k)
 
             # Compute the average curvature of the K-nearest neighbors
             knn_curvatures_all = [self.curvatures[i] for i in indices[1:]]

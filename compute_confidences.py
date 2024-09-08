@@ -17,7 +17,7 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed_all(42)
 
 
-def divide_by_class(loader: DataLoader) -> Tuple[Dict[int, DataLoader], Dict[List[int]]]:
+def divide_by_class(loader: DataLoader) -> Tuple[Dict[int, DataLoader], Dict[int, List[int]]]:
     """Divide the data in the loader into separate loaders by class."""
     class_indices = {}
     dataset = loader.dataset
