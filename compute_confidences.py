@@ -58,9 +58,9 @@ def compute_curvatures(loader: DataLoader, k1: int):
     return gaussian_curvatures, mean_curvatures
 
 
-def compute_proximity_metrics(loader: DataLoader, gaussian_curvatures: List[float], k2: int):
+def compute_proximity_metrics(loader: DataLoader, k2: int):
     """Compute the geometric metrics of the data that can be used to identify hard samples, class-wise."""
-    proximity = Proximity(loader, gaussian_curvatures, k=k2)
+    proximity = Proximity(loader, k=k2)
     proximity_metrics = proximity.compute_proximity_metrics()
     return proximity_metrics
 

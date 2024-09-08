@@ -606,11 +606,10 @@ def compute_iou(adaptive_indices, full_indices):
     return iou
 
 
-def main(dataset_name: str, models_count: int, training: str, threshold: float, k1: int, k2: int):
+def main(dataset_name: str, models_count: int, training: str, threshold: float, k2: int):
     # Define file paths for saving and loading cached results
     accuracies_file = f"{u.HARD_IMBALANCE_DIR}{dataset_name}_avg_class_accuracies.pkl"
     proximity_file = f"{u.HARD_IMBALANCE_DIR}{training}{dataset_name}_proximity_indicators.pkl"
-    curvatures_file = f"{u.HARD_IMBALANCE_DIR}{training}{dataset_name}_curvature_indicators.pkl"
 
     # Load the dataset
     if training == 'full':
@@ -621,8 +620,7 @@ def main(dataset_name: str, models_count: int, training: str, threshold: float, 
     num_classes = len(np.unique(training_labels))
     metric_abbreviations = [
         'SameCentroidDist', 'OtherCentroidDist', 'CentroidDistRatio', 'Same1NNDist', 'Other1NNDist', '1NNRatioDist',
-        'AvgSame40NNDist', 'AvgOther40NNDist', 'AvgAll40NNDist', 'Avg40NNDistRatio', '40NNPercSame',
-        '40NNPercOther', 'AvgSame40NNCurv', 'AvgOther40NNCurv', 'AvgAll40NNCurv', 'GaussCurv', 'MeanCurv'
+        'AvgSame40NNDist', 'AvgOther40NNDist', 'AvgAll40NNDist', 'Avg40NNDistRatio', '40NNPercSame', '40NNPercOther'
     ]
 
     if os.path.exists(accuracies_file):
@@ -631,27 +629,18 @@ def main(dataset_name: str, models_count: int, training: str, threshold: float, 
     else:
         raise Exception('Train an ensemble via `train_ensembles.py --training full` before running this program.')
     loader = DataLoader(training_dataset, batch_size=len(training_dataset), shuffle=False)
-    if os.path.exists(curvatures_file):
-        print('Loading curvatures.')
-        gaussian_curvatures, mean_curvatures = u.load_data(curvatures_file)
-    else:
-        print('Calculating curvatures.')
-        gaussian_curvatures, mean_curvatures = compute_curvatures(loader, k1)
-        u.save_data((gaussian_curvatures, mean_curvatures), curvatures_file)
 
     if os.path.exists(proximity_file):
         print('Loading proximities.')
         proximity_metrics = u.load_data(proximity_file)
     else:
         print('Calculating proximities.')
-        proximity_metrics = compute_proximity_metrics(loader, gaussian_curvatures, k2)
+        proximity_metrics = compute_proximity_metrics(loader, k2)
         u.save_data(proximity_metrics, proximity_file)
 
-    gaussian_curvatures = [abs(gc) for gc in gaussian_curvatures]  # large negative curvature also makes sample hard
-    all_metrics = proximity_metrics + (gaussian_curvatures, mean_curvatures)
+    all_metrics = proximity_metrics
     class_averages = compute_class_averages_of_metrics(all_metrics, training_labels)
-    invert_metrics = [False, True, False, False, True, False, False, True, False, False, True, False, False, False,
-                      False, False, False]
+    invert_metrics = [False, True, False, False, True, False, False, True, False, False, True, False]
 
     # Extract the hardest samples for each metric and compute their class distributions
     adaptive_easy_indices, adaptive_hard_indices, adaptive_easy_distributions, adaptive_hard_distributions, \
@@ -738,7 +727,6 @@ if __name__ == '__main__':
                              ' (full), or the ones trained only on the training set (part).')
     parser.add_argument('--threshold', type=float, default=0.1,
                         help='The percentage of the most extreme (hardest) samples that will be considered as hard.')
-    parser.add_argument('--k1', type=int, default=40, help='k parameter for the kNN in curvature computations.')
     parser.add_argument('--k2', type=int, default=10, help='k parameter for the kNN in proximity computations.')
     args = parser.parse_args()
 
