@@ -16,8 +16,8 @@ class HardnessImbalanceMeasurer:
         self.dataset_name = dataset_name
         self.models_count = models_count
         self.training = training
-        self.easy_indices = u.load_data(f'{u.DIVISIONS_SAVE_DIR}/{self.dataset_name}_adaptive_easy_indices.pkl')
-        self.hard_indices = u.load_data(f'{u.DIVISIONS_SAVE_DIR}/{self.dataset_name}_adaptive_hard_indices.pkl')
+        self.easy_indices = u.load_data(f'{u.DIVISIONS_SAVE_DIR}{training}{self.dataset_name}_fixed_easy_indices.pkl')
+        self.hard_indices = u.load_data(f'{u.DIVISIONS_SAVE_DIR}{training}{self.dataset_name}_fixed_hard_indices.pkl')
         self.models = []
         for i in range(self.models_count):
             model = LeNet().to(u.DEVICE)
@@ -89,7 +89,7 @@ class HardnessImbalanceMeasurer:
                 hard_accuracies.append(self.measure_imbalance_on_one_model(model, metric_hard_indices))
 
             accuracies.append({
-                'metric': metric_abbreviations[metric_idx],
+                'metric': metric_idx,
                 'mean_acc_all': np.mean(all_accuracies),
                 'std_acc_all': np.std(all_accuracies),
                 'mean_acc_easy': np.mean(easy_accuracies),
@@ -114,7 +114,6 @@ class HardnessImbalanceMeasurer:
 
         # Loop through each metric and plot the error rates (100 - accuracy) as vertical line segments
         for i, acc in enumerate(accuracies):
-            metric_idx = acc['metric_idx']
 
             # Compute error rates (since error rate = 100% - accuracy)
             error_all = 1 - acc['mean_acc_all']
@@ -124,25 +123,24 @@ class HardnessImbalanceMeasurer:
             max_error_rate = max(max_error_rate, error_all, error_easy, error_hard)
 
             # Plot vertical line segments using Line2D for all, easy, and hard samples
-            ax.add_line(Line2D([metric_idx - epsilon, metric_idx + epsilon], [error_easy, error_easy],
+            ax.add_line(Line2D([i - epsilon, i + epsilon], [error_easy, error_easy],
                                color='green', linewidth=5))  # Green for easy
-            ax.add_line(Line2D([metric_idx - epsilon, metric_idx + epsilon], [error_all, error_all],
+            ax.add_line(Line2D([i - epsilon, i + epsilon], [error_all, error_all],
                                color='black', linewidth=5))  # Black for all
-            ax.add_line(Line2D([metric_idx - epsilon, metric_idx + epsilon], [error_hard, error_hard],
+            ax.add_line(Line2D([i - epsilon, i + epsilon], [error_hard, error_hard],
                                color='red', linewidth=5))  # Red for hard
 
         # Calculate ylim based on the max error rate with an epsilon margin (10% of max error rate)
         epsilon_y = 0.1 * max_error_rate
         ax.set_ylim(0, max_error_rate + epsilon_y)
         # Labeling and formatting
-        ax.set_xticks(metric_abbreviations)
-        ax.set_xticklabels([f'{acc["metric_idx"]}' for acc in accuracies])
+        ax.set_xticks(range(num_metrics))
+        ax.set_xticklabels(metric_abbreviations)
         ax.set_xlabel('Metric')
         ax.set_ylabel('Error Rate (%)')
         ax.set_title('Error Rates across Different Metrics')
         ax.grid(True)
-
-        # Adjust the x limits to avoid cutting off lines on the right edge
+        plt.xticks(rotation=45, ha='right')  # Rotate x-tick labels
         ax.set_xlim(0.5, num_metrics + 0.5)  # Padding added to the left and right
 
         # Show the plot
@@ -161,8 +159,8 @@ if __name__ == "__main__":
                         help="Name of the dataset (e.g., MNIST, CIFAR10, etc.)")
     parser.add_argument("--models_count", type=int, default='100', help="Number of models in the ensemble")
     parser.add_argument('--training', type=str, choices=['full', 'part'], default='full',
-                        help='Indicates which models to choose for evaluations - the ones trained on the entire dataset '
-                             '(full), or the ones trained only on the training set (part).')
+                        help='Indicates which models to choose for evaluations - the ones trained on the entire dataset'
+                             ' (full), or the ones trained only on the training set (part).')
 
     args = parser.parse_args()
 

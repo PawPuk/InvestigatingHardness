@@ -68,7 +68,6 @@ def load_full_data_and_normalize(dataset_name: str) -> TensorDataset:
                                                     transform=transforms.ToTensor())
     test_dataset = getattr(datasets, dataset_name)(root="./data", train=False, download=True,
                                                    transform=transforms.ToTensor())
-    torch.manual_seed(42)
     if dataset_name in ['CIFAR10', 'CIFAR100']:
         train_data = torch.tensor(train_dataset.data).permute(0, 3, 1, 2).float()  # (N, H, W, C) -> (N, C, H, W)
         test_data = torch.tensor(test_dataset.data).permute(0, 3, 1, 2).float()
@@ -83,6 +82,7 @@ def load_full_data_and_normalize(dataset_name: str) -> TensorDataset:
     data_vars = torch.sqrt(torch.var(full_data, dim=(0, 2, 3)) / 255.0 ** 2 + EPSILON)
     # Apply the calculated normalization to the subset
     normalize_transform = transforms.Normalize(mean=data_means, std=data_vars)
+    # TODO: maybe weird results come from applying normalization to data when computing metrics (not for training)...
     normalized_subset_data = normalize_transform(full_data / 255.0)  # TODO: see the impact of removing normalization
     return TensorDataset(normalized_subset_data, full_targets)
 
@@ -98,7 +98,6 @@ def load_data_and_normalize(dataset_name: str) -> Tuple[TensorDataset, TensorDat
                                                     transform=transforms.ToTensor())
     test_dataset = getattr(datasets, dataset_name)(root="./data", train=False, download=True,
                                                    transform=transforms.ToTensor())
-    torch.manual_seed(42)
     if dataset_name in ['CIFAR10', 'CIFAR100']:
         train_data = torch.tensor(train_dataset.data).permute(0, 3, 1, 2).float()
         test_data = torch.tensor(test_dataset.data).permute(0, 3, 1, 2).float()

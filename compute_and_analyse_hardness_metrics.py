@@ -240,7 +240,7 @@ def extract_extreme_samples_threshold(metrics: List[List[float]], labels: List[i
             avg_gradients.append(np.mean(gradients[start:end]))
 
         # Smooth the first derivative using Savitzky-Golay filter
-        smoothed_avg_gradients = savgol_filter(avg_gradients, window_length=999, polyorder=2)
+        smoothed_avg_gradients = savgol_filter(avg_gradients, window_length=1000, polyorder=2)
 
         # Compute the second derivative (gradient of the smoothed first derivative)
         second_derivatives = np.gradient(smoothed_avg_gradients)
@@ -453,7 +453,7 @@ def compute_class_averages_of_metrics(metrics, labels):
         if max_val != 0:
             metric = metric / max_val
         else:
-            raise Exception('This should not happen.')
+            raise Exception('This should not happen.')  # Sanity check
 
         # Compute the average of each normalized metric for every class
         class_average = defaultdict(list)
@@ -462,10 +462,14 @@ def compute_class_averages_of_metrics(metrics, labels):
 
         # Compute the mean of each class
         for class_label, values in class_average.items():
-            class_average[class_label] = list(np.mean(values))
+            class_average[class_label] = np.mean(values)
 
         class_averages.append(class_average)
 
+    print('\nThe computed class averages are as follows:')
+    for metric_idx in range(len(metrics)):
+        print(f'\t{class_averages[metric_idx]}')
+    print('-'*20, '\n')
     return class_averages
 
 
@@ -602,13 +606,13 @@ def compute_iou(adaptive_indices, full_indices):
     return iou
 
 
-def main(dataset_name: str, models_count: int, training: str, threshold: float):
+def main(dataset_name: str, models_count: int, training: str, threshold: float, k1: int, k2: int):
     # Define file paths for saving and loading cached results
     accuracies_file = f"{u.HARD_IMBALANCE_DIR}{dataset_name}_avg_class_accuracies.pkl"
-    proximity_file = f"{training}{u.HARD_IMBALANCE_DIR}{dataset_name}_proximity_indicators.pkl"
-    curvatures_file = f"{training}{u.HARD_IMBALANCE_DIR}{dataset_name}_curvature_indicators.pkl"
+    proximity_file = f"{u.HARD_IMBALANCE_DIR}{training}{dataset_name}_proximity_indicators.pkl"
+    curvatures_file = f"{u.HARD_IMBALANCE_DIR}{training}{dataset_name}_curvature_indicators.pkl"
 
-    # Load the dataset (full for proximity_indicators, and official training+test splits for ratio)
+    # Load the dataset
     if training == 'full':
         training_dataset = u.load_full_data_and_normalize(dataset_name)
     else:
@@ -632,7 +636,7 @@ def main(dataset_name: str, models_count: int, training: str, threshold: float):
         gaussian_curvatures, mean_curvatures = u.load_data(curvatures_file)
     else:
         print('Calculating curvatures.')
-        gaussian_curvatures, mean_curvatures = compute_curvatures(loader)
+        gaussian_curvatures, mean_curvatures = compute_curvatures(loader, k1)
         u.save_data((gaussian_curvatures, mean_curvatures), curvatures_file)
 
     if os.path.exists(proximity_file):
@@ -640,7 +644,7 @@ def main(dataset_name: str, models_count: int, training: str, threshold: float):
         proximity_metrics = u.load_data(proximity_file)
     else:
         print('Calculating proximities.')
-        proximity_metrics = compute_proximity_metrics(loader, gaussian_curvatures)
+        proximity_metrics = compute_proximity_metrics(loader, gaussian_curvatures, k2)
         u.save_data(proximity_metrics, proximity_file)
 
     gaussian_curvatures = [abs(gc) for gc in gaussian_curvatures]  # large negative curvature also makes sample hard
@@ -655,8 +659,8 @@ def main(dataset_name: str, models_count: int, training: str, threshold: float):
         extract_extreme_samples_threshold(all_metrics, training_labels, dataset_name, invert_metrics, training)
 
     # Compute and visualize the correlation heatmaps
-    compute_correlation_heatmaps(adaptive_easy_indices, adaptive_hard_indices, 'adaptive')
-    compute_correlation_heatmaps(fixed_easy_indices, fixed_hard_indices, 'fixed')
+    # compute_correlation_heatmaps(adaptive_easy_indices, adaptive_hard_indices, 'adaptive')
+    # compute_correlation_heatmaps(fixed_easy_indices, fixed_hard_indices, 'fixed')
 
     if training == 'full':
         # Compare and plot all metrics against class-level accuracies
@@ -675,7 +679,7 @@ def main(dataset_name: str, models_count: int, training: str, threshold: float):
         compare_metrics_to_class_accuracies(class_averages, avg_class_accuracies, num_classes,
                                             f'{training}{dataset_name}_avgPCC.pdf',
                                             f'{training}{dataset_name}_avgSRC.pdf')
-        compute_easy_hard_ratios(dataset_name, adaptive_easy_indices, adaptive_hard_indices)
+        # compute_easy_hard_ratios(dataset_name, adaptive_easy_indices, adaptive_hard_indices)
     else:
         full_easy_indices = u.load_data(f'{u.DIVISIONS_SAVE_DIR}/full{dataset_name}_adaptive_easy_indices.pkl')
         full_hard_indices = u.load_data(f'{u.DIVISIONS_SAVE_DIR}/full{dataset_name}_adaptive_hard_indices.pkl')
@@ -734,6 +738,8 @@ if __name__ == '__main__':
                              ' (full), or the ones trained only on the training set (part).')
     parser.add_argument('--threshold', type=float, default=0.1,
                         help='The percentage of the most extreme (hardest) samples that will be considered as hard.')
+    parser.add_argument('--k1', type=int, default=40, help='k parameter for the kNN in curvature computations.')
+    parser.add_argument('--k2', type=int, default=10, help='k parameter for the kNN in proximity computations.')
     args = parser.parse_args()
 
     main(**vars(args))

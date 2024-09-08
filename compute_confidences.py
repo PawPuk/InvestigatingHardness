@@ -1,5 +1,5 @@
 import argparse
-from typing import List, Tuple, Any
+from typing import Dict, List, Tuple, Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -17,7 +17,7 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed_all(42)
 
 
-def divide_by_class(loader: DataLoader):
+def divide_by_class(loader: DataLoader) -> Tuple[Dict[int, DataLoader], Dict[List[int]]]:
     """Divide the data in the loader into separate loaders by class."""
     class_indices = {}
     dataset = loader.dataset
@@ -34,12 +34,11 @@ def divide_by_class(loader: DataLoader):
     class_loaders = {}
     for cls, indices in class_indices.items():
         class_loaders[cls] = DataLoader(Subset(dataset, indices), batch_size=len(indices), shuffle=False)
-        print(len(Subset(dataset, indices)))
 
     return class_loaders, class_indices
 
 
-def compute_curvatures(loader: DataLoader):
+def compute_curvatures(loader: DataLoader, k1: int):
     """Compute curvatures for all samples in the loader."""
     # Determine the total number of samples in the dataset
     total_samples = sum(len(data) for data, _ in loader)
@@ -54,14 +53,14 @@ def compute_curvatures(loader: DataLoader):
     for cls, class_loader in tqdm(class_loaders.items(), desc='Iterating through classes.'):
         for data, _ in class_loader:
             data.to(u.DEVICE)
-            Curvature(data, class_indices[cls], k=40).estimate_curvatures(gaussian_curvatures, mean_curvatures)
+            Curvature(data, class_indices[cls], k=k1).estimate_curvatures(gaussian_curvatures, mean_curvatures)
 
     return gaussian_curvatures, mean_curvatures
 
 
-def compute_proximity_metrics(loader: DataLoader, gaussian_curvatures: List[float]):
+def compute_proximity_metrics(loader: DataLoader, gaussian_curvatures: List[float], k2: int):
     """Compute the geometric metrics of the data that can be used to identify hard samples, class-wise."""
-    proximity = Proximity(loader, gaussian_curvatures, k=40)
+    proximity = Proximity(loader, gaussian_curvatures, k=k2)
     proximity_metrics = proximity.compute_proximity_metrics()
     return proximity_metrics
 
