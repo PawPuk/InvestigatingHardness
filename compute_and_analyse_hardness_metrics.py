@@ -21,7 +21,7 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed_all(42)
 
 
-def detect_family(normalized_metric: np.ndarray, avg_gradients: List[float]):
+def detect_family(normalized_metric: np.ndarray, avg_gradients: List[np.ndarray]):
     if is_first_family_metric(avg_gradients):
         return 1
     elif is_second_family_metric(normalized_metric, avg_gradients):
@@ -29,19 +29,19 @@ def detect_family(normalized_metric: np.ndarray, avg_gradients: List[float]):
     return 3
 
 
-def is_first_family_metric(avg_gradients: List[float]) -> bool:
+def is_first_family_metric(avg_gradients: List[np.ndarray]) -> bool:
     """Check if the metric belongs to the first family."""
     # Check if the rightmost points have the highest value
     right_most = np.mean(avg_gradients[-1000:])
     # Check if the leftmost points are higher than the mean of the middle samples
     left_most = np.mean(avg_gradients[:1000])
-    middle_mean = np.mean(avg_gradients[len(avg_gradients)//2 - 10000: len(avg_gradients)//2 + 10000])
+    middle_mean = np.mean(avg_gradients[len(avg_gradients) // 2 - 10000: len(avg_gradients) // 2 + 10000])
 
     # Conditions: rightmost should be highest, leftmost should be higher than the middle mean
     return right_most > 3 * middle_mean and left_most > 3 * middle_mean
 
 
-def is_second_family_metric(normalized_metric: np.ndarray, avg_gradients: List[float]) -> int:
+def is_second_family_metric(normalized_metric: np.ndarray, avg_gradients: List[np.ndarray]) -> int:
     """Check if the metric belongs to the new family based on distribution and gradient."""
     # Check the normalized distribution (left side low, right side high)
     left_side_distribution = np.mean(normalized_metric[:500])
@@ -93,7 +93,7 @@ def find_division_points_for_second_family(first_derivatives: np.ndarray, window
     raise Exception
 
 
-def find_division_points_for_third_family(second_derivatives: List[float], window_size1: int = 20000,
+def find_division_points_for_third_family(second_derivatives: np.ndarray, window_size1: int = 20000,
                                           window_size2: int = 500, epsilon_factor: float = 250) -> Tuple[int, int]:
     left_most_value = np.mean(second_derivatives[:window_size1])
     epsilon = epsilon_factor * left_most_value
@@ -106,10 +106,11 @@ def find_division_points_for_third_family(second_derivatives: List[float], windo
     raise Exception
 
 
-def plot_metric_results(metric_idx: int, sorted_normalized_metric: np.ndarray, avg_gradients: List[float],
-                        avg_second_gradients: List[float], first_division_point: int, second_division_point: int,
-                        dataset_name: str, invert: bool, hard_threshold_percent: float):
-    """Plot the results with division points marked and areas colored as easy, medium, and hard, along with hard thresholds."""
+def plot_metric_results(metric_idx: int, sorted_normalized_metric: np.ndarray, avg_gradients: List[np.ndarray],
+                        avg_second_gradients: np.ndarray, first_division_point: int, second_division_point: int,
+                        dataset_name: str, invert: bool, hard_threshold_percent: float, training: str):
+    """Plot the results with division points marked and areas colored as easy, medium, and hard, along with hard
+    thresholds."""
     fig, axes = plt.subplots(1, 3, figsize=(20, 6))
 
     num_samples = len(sorted_normalized_metric)
@@ -132,11 +133,13 @@ def plot_metric_results(metric_idx: int, sorted_normalized_metric: np.ndarray, a
         if invert:
             # If invert is True, left is hard (red), right is easy (green)
             axes[0].axvspan(0, first_division_point, facecolor='red', alpha=0.3, label='Hard')
-            axes[0].axvspan(second_division_point, len(sorted_normalized_metric), facecolor='green', alpha=0.3, label='Easy')
+            axes[0].axvspan(second_division_point, len(sorted_normalized_metric), facecolor='green', alpha=0.3,
+                            label='Easy')
         else:
             # If invert is False, left is easy (green), right is hard (red)
             axes[0].axvspan(0, first_division_point, facecolor='green', alpha=0.3, label='Easy')
-            axes[0].axvspan(second_division_point, len(sorted_normalized_metric), facecolor='red', alpha=0.3, label='Hard')
+            axes[0].axvspan(second_division_point, len(sorted_normalized_metric), facecolor='red', alpha=0.3,
+                            label='Hard')
 
     # Add division lines for adaptive (soft) thresholds
     if first_division_point is not None:
@@ -182,17 +185,18 @@ def plot_metric_results(metric_idx: int, sorted_normalized_metric: np.ndarray, a
     # Save plot
     output_dir = 'metric_plots'
     os.makedirs(output_dir, exist_ok=True)
-    plt.savefig(os.path.join(output_dir, f'{dataset_name}_metric_{metric_idx + 1}_distribution_gradients_second_derivatives.pdf'))
-    plt.savefig(os.path.join(output_dir,
-                             f'{dataset_name}_metric_{metric_idx + 1}_distribution_gradients_second_derivatives.png'))
+    plt.savefig(os.path.join(output_dir, f'{training}{dataset_name}_metric_{metric_idx + 1}_distribution_gradients_'
+                                         f'second_derivatives.pdf'))
+    plt.savefig(os.path.join(output_dir, f'{training}{dataset_name}_metric_{metric_idx + 1}_distribution_gradients_'
+                                         f'second_derivatives.png'))
 
     plt.close()
 
 
-
 def extract_extreme_samples_threshold(metrics: List[List[float]], labels: List[int], dataset_name: str,
-                                      invert: List[bool], hard_threshold_percent: float = 0.05):
-    """Extract easy and hard samples using both adaptive and hard thresholds, returning their indices and distributions."""
+                                      invert: List[bool], training: str, hard_threshold_percent: float = 0.05):
+    """Extract easy and hard samples using both adaptive and hard thresholds, returning their indices and
+    distributions."""
     num_metrics = len(metrics)
 
     # Initialize lists for soft (adaptive) and hard threshold indices and distributions
@@ -308,7 +312,7 @@ def extract_extreme_samples_threshold(metrics: List[List[float]], labels: List[i
         # Plot results and pass hard thresholds to the plotting function
         plot_metric_results(metric_idx, sorted_normalized_metric, avg_gradients, second_derivatives,
                             first_division_point, second_division_point, dataset_name, invert[metric_idx],
-                            hard_threshold_percent)
+                            hard_threshold_percent, training)
 
     return (adaptive_easy_samples, adaptive_hard_samples, adaptive_easy_distributions, adaptive_hard_distributions,
             hard_easy_samples, hard_hard_samples, hard_easy_distributions, hard_hard_distributions)
@@ -334,10 +338,9 @@ def compare_metrics_to_class_accuracies(class_distributions, avg_class_accuracie
     p_values_spearman = []
 
     metric_abbreviations = [
-        'SCD', 'OCD', 'CR', 'CSC', 'COC', 'CDR',
-        'ASD', 'AOD', 'AAD', 'ADR', 'PSK',
-        'POK', 'ASC', 'AOC', 'AAC', 'GC',
-        'MC'
+        'SameCentroidDist', 'OtherCentroidDist', 'CentroidDistRatio', 'Same1NN', 'Other1NN', '1NNRatio',
+        'AvgSame40NN', 'AvgOther40NN', 'AvgAll40NN', 'Avg40NNRatio', '40NNPercSame', '40NNPercOther',
+        'AvgSame40NNCurv', 'AvgOther40NNCurv', 'AvgAll40NNCurv', 'GaussCurv', 'MeanCurv'
     ]  # Abbreviations for each metric to keep plot readable.
 
     # Compute both PCC and Spearman for each metric
@@ -355,10 +358,10 @@ def compare_metrics_to_class_accuracies(class_distributions, avg_class_accuracie
         p_values_spearman.append(p_value_spearman)
 
     print()
-    print('-'*20)
+    print('-' * 20)
     print("PCC p-values:", p_values_pcc)
     print("Spearman p-values:", p_values_spearman)
-    print('-'*20)
+    print('-' * 20)
     print()
 
     # Define colors based on p-value significance for PCC
@@ -450,7 +453,7 @@ def compute_class_averages_of_metrics(metrics, labels):
         if max_val != 0:
             metric = metric / max_val
         else:
-            raise Exception('This should not happen.')
+            raise Exception('This should not happen.')  # Sanity check
 
         # Compute the average of each normalized metric for every class
         class_average = defaultdict(list)
@@ -463,6 +466,10 @@ def compute_class_averages_of_metrics(metrics, labels):
 
         class_averages.append(class_average)
 
+    print('\nThe computed class averages are as follows:')
+    for metric_idx in range(len(metrics)):
+        print(f'\t{class_averages[metric_idx]}')
+    print('-'*20, '\n')
     return class_averages
 
 
@@ -475,9 +482,9 @@ def compute_correlation_heatmaps(easy_distribution, hard_distribution, threshold
     for i in range(num_metrics):
         for j in range(num_metrics):
             easy_overlap[i, j] = len(set(easy_distribution[i]) & set(easy_distribution[j])) / len(
-                    easy_distribution[j])
+                easy_distribution[j])
             hard_overlap[i, j] = len(set(hard_distribution[i]) & set(hard_distribution[j])) / len(
-                    hard_distribution[j])
+                hard_distribution[j])
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -497,7 +504,8 @@ def compute_correlation_heatmaps(easy_distribution, hard_distribution, threshold
 
 
 def compute_easy_hard_ratios(dataset_name: str, easy_indices: List[np.ndarray], hard_indices: List[np.ndarray]) -> None:
-    """Compute the ratio of easy to hard samples in both training and test splits for each metric and display as a table."""
+    """Compute the ratio of easy to hard samples in both training and test splits for each metric and display as a
+    table."""
 
     # Load the training and test datasets using the provided function
     train_dataset, test_dataset = u.load_data_and_normalize(dataset_name)
@@ -598,13 +606,12 @@ def compute_iou(adaptive_indices, full_indices):
     return iou
 
 
-def main(dataset_name: str, models_count: int, training: str, threshold: float):
+def main(dataset_name: str, models_count: int, training: str, threshold: float, k2: int):
     # Define file paths for saving and loading cached results
     accuracies_file = f"{u.HARD_IMBALANCE_DIR}{dataset_name}_avg_class_accuracies.pkl"
-    proximity_file = f"{u.HARD_IMBALANCE_DIR}{dataset_name}_proximity_indicators.pkl"
-    curvatures_file = f"{u.HARD_IMBALANCE_DIR}{dataset_name}_curvature_indicators.pkl"
+    proximity_file = f"{u.HARD_IMBALANCE_DIR}{training}{dataset_name}_proximity_indicators.pkl"
 
-    # Load the dataset (full for proximity_indicators, and official training+test splits for ratio)
+    # Load the dataset
     if training == 'full':
         training_dataset = u.load_full_data_and_normalize(dataset_name)
     else:
@@ -612,10 +619,8 @@ def main(dataset_name: str, models_count: int, training: str, threshold: float):
     training_labels = training_dataset.tensors[1].numpy()
     num_classes = len(np.unique(training_labels))
     metric_abbreviations = [
-        'SCD', 'OCD', 'CR', 'CSC', 'COC', 'CDR',
-        'ASD', 'AOD', 'AAD', 'ADR', 'PSK',
-        'POK', 'ASC', 'AOC', 'AAC', 'GC',
-        'MC'
+        'SameCentroidDist', 'OtherCentroidDist', 'CentroidDistRatio', 'Same1NNDist', 'Other1NNDist', '1NNRatioDist',
+        'AvgSame40NNDist', 'AvgOther40NNDist', 'AvgAll40NNDist', 'Avg40NNDistRatio', '40NNPercSame', '40NNPercOther'
     ]
 
     if os.path.exists(accuracies_file):
@@ -624,55 +629,46 @@ def main(dataset_name: str, models_count: int, training: str, threshold: float):
     else:
         raise Exception('Train an ensemble via `train_ensembles.py --training full` before running this program.')
     loader = DataLoader(training_dataset, batch_size=len(training_dataset), shuffle=False)
-    if os.path.exists(curvatures_file):
-        print('Loading curvatures.')
-        gaussian_curvatures, mean_curvatures = u.load_data(curvatures_file)
-    else:
-        print('Calculating curvatures.')
-        gaussian_curvatures, mean_curvatures = compute_curvatures(loader)
-        u.save_data((gaussian_curvatures, mean_curvatures), curvatures_file)
 
     if os.path.exists(proximity_file):
         print('Loading proximities.')
         proximity_metrics = u.load_data(proximity_file)
     else:
         print('Calculating proximities.')
-        proximity_metrics = compute_proximity_metrics(loader, gaussian_curvatures)
+        proximity_metrics = compute_proximity_metrics(loader, k2)
         u.save_data(proximity_metrics, proximity_file)
 
-    gaussian_curvatures = [abs(gc) for gc in gaussian_curvatures]  # large negative curvature also makes sample hard
-    all_metrics = proximity_metrics + (gaussian_curvatures, mean_curvatures)
+    all_metrics = proximity_metrics
     class_averages = compute_class_averages_of_metrics(all_metrics, training_labels)
-    invert_metrics = [False, True, False, False, True, False, False, True, False, False, True, False, False, False,
-                      False, False, False]
+    invert_metrics = [False, True, False, False, True, False, False, True, False, False, True, False]
 
     # Extract the hardest samples for each metric and compute their class distributions
     adaptive_easy_indices, adaptive_hard_indices, adaptive_easy_distributions, adaptive_hard_distributions, \
-        fixed_easy_indices, fixed_hard_indices, fixed_easy_distributions, fixed_hard_distributions = (
-        extract_extreme_samples_threshold(all_metrics, training_labels, dataset_name, invert_metrics))
+        fixed_easy_indices, fixed_hard_indices, fixed_easy_distributions, fixed_hard_distributions = \
+        extract_extreme_samples_threshold(all_metrics, training_labels, dataset_name, invert_metrics, training)
 
     # Compute and visualize the correlation heatmaps
-    compute_correlation_heatmaps(adaptive_easy_indices, adaptive_hard_indices, 'adaptive')
-    compute_correlation_heatmaps(fixed_easy_indices, fixed_hard_indices, 'fixed')
+    # compute_correlation_heatmaps(adaptive_easy_indices, adaptive_hard_indices, 'adaptive')
+    # compute_correlation_heatmaps(fixed_easy_indices, fixed_hard_indices, 'fixed')
 
     if training == 'full':
         # Compare and plot all metrics against class-level accuracies
         compare_metrics_to_class_accuracies(adaptive_easy_distributions, avg_class_accuracies, num_classes,
-                                            f'{dataset_name}_adaptive_easyPCC.pdf',
-                                            f'{dataset_name}_adaptive_easySRC.pdf')
+                                            f'{training}{dataset_name}_adaptive_easyPCC.pdf',
+                                            f'{training}{dataset_name}_adaptive_easySRC.pdf')
         compare_metrics_to_class_accuracies(adaptive_hard_distributions, avg_class_accuracies, num_classes,
-                                            f'{dataset_name}_adaptive_hardPCC.pdf',
-                                            f'{dataset_name}_adaptive_hardSRC.pdf')
+                                            f'{training}{dataset_name}_adaptive_hardPCC.pdf',
+                                            f'{training}{dataset_name}_adaptive_hardSRC.pdf')
         compare_metrics_to_class_accuracies(fixed_easy_distributions, avg_class_accuracies, num_classes,
-                                            f'{dataset_name}_fixed_easyPCC.pdf',
-                                            f'{dataset_name}_fixed_easySRC.pdf')
+                                            f'{training}{dataset_name}_fixed_easyPCC.pdf',
+                                            f'{training}{dataset_name}_fixed_easySRC.pdf')
         compare_metrics_to_class_accuracies(fixed_hard_distributions, avg_class_accuracies, num_classes,
-                                            f'{dataset_name}_fixed_hardPCC.pdf',
-                                            f'{dataset_name}_fixed_hardSRC.pdf')
+                                            f'{training}{dataset_name}_fixed_hardPCC.pdf',
+                                            f'{training}{dataset_name}_fixed_hardSRC.pdf')
         compare_metrics_to_class_accuracies(class_averages, avg_class_accuracies, num_classes,
-                                            f'{dataset_name}_avgPCC.pdf',
-                                            f'{dataset_name}_avgSRC.pdf')
-        compute_easy_hard_ratios(dataset_name, adaptive_easy_indices, adaptive_hard_indices)
+                                            f'{training}{dataset_name}_avgPCC.pdf',
+                                            f'{training}{dataset_name}_avgSRC.pdf')
+        # compute_easy_hard_ratios(dataset_name, adaptive_easy_indices, adaptive_hard_indices)
     else:
         full_easy_indices = u.load_data(f'{u.DIVISIONS_SAVE_DIR}/full{dataset_name}_adaptive_easy_indices.pkl')
         full_hard_indices = u.load_data(f'{u.DIVISIONS_SAVE_DIR}/full{dataset_name}_adaptive_hard_indices.pkl')
@@ -708,9 +704,9 @@ def main(dataset_name: str, models_count: int, training: str, threshold: float):
 
         # Call the plotting function
         plot_correlation_metrics(metric_abbreviations, iou_values_easy, spearman_values_easy, kendall_values_easy,
-                                 f'{dataset_name}_easy_correlations.pdf')
+                                 f'{training}{dataset_name}_easy_correlations.pdf')
         plot_correlation_metrics(metric_abbreviations, iou_values_hard, spearman_values_hard, kendall_values_hard,
-                                 f'{dataset_name}_hard_correlations.pdf')
+                                 f'{training}{dataset_name}_hard_correlations.pdf')
 
     u.save_data(adaptive_easy_indices, f'{u.DIVISIONS_SAVE_DIR}/{training}{dataset_name}_adaptive_easy_indices.pkl')
     u.save_data(adaptive_hard_indices, f'{u.DIVISIONS_SAVE_DIR}/{training}{dataset_name}_adaptive_hard_indices.pkl')
@@ -727,10 +723,11 @@ if __name__ == '__main__':
                         help='Name of the dataset (MNIST, CIFAR10, CIFAR100).')
     parser.add_argument('--models_count', type=int, default=20, help='Number of models in the ensemble.')
     parser.add_argument('--training', type=str, choices=['full', 'part'], default='full',
-                        help='Indicates which models to choose for evaluations - the ones trained on the entire dataset '
-                             '(full), or the ones trained only on the training set (part).')
+                        help='Indicates which models to choose for evaluations - the ones trained on the entire dataset'
+                             ' (full), or the ones trained only on the training set (part).')
     parser.add_argument('--threshold', type=float, default=0.1,
                         help='The percentage of the most extreme (hardest) samples that will be considered as hard.')
+    parser.add_argument('--k2', type=int, default=10, help='k parameter for the kNN in proximity computations.')
     args = parser.parse_args()
 
     main(**vars(args))

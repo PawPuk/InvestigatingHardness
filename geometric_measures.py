@@ -14,11 +14,12 @@ import utils as u
 
 
 class Curvature:
-    def __init__(self, data, data_indices, k=40, pca_components=8):
+    def __init__(self, data, data_indices, k, pca_components=8):
         self.data = data.reshape(data.shape[0], -1)  # Flatten the images (required for image datasets)
         self.data_indices = data_indices
         self.k = k
         self.pca_components = pca_components
+        # TODO: What pca_components do Ma et al. use? Rerun for latent spaces to verify correctness (same results)
 
     @staticmethod
     def compute_hessian(coords):
@@ -50,6 +51,7 @@ class Curvature:
                 k1, k2 = eigenvalues[:2]
                 gaussian_curvature = k1 * k2  # Gaussian curvature is the product of the principal curvatures
                 mean_curvature = (k1 + k2) / 2  # Mean curvature is the average of the principal curvatures
+                # The below is to make sure we do not override the data (sanity check)
                 if gaussian_curvatures[self.data_indices[i]] is not None:
                     raise Exception
                 if mean_curvatures[self.data_indices[i]] is not None:
@@ -59,18 +61,16 @@ class Curvature:
 
 
 class Proximity:
-    def __init__(self, loader: DataLoader, curvatures: List[float], k: int):
+    def __init__(self, loader: DataLoader, k: int):
         """Initialize with the data loader, curvatures, and set K for KNN."""
         self.loader = loader
-        self.curvatures = curvatures
         self.k = k
         self.centroids = self.compute_centroids()
         self.samples, self.labels = self.collect_samples()
 
     def compute_centroids(self):
         """Compute the centroids for each class."""
-        centroids = {}
-        class_counts = {}
+        centroids, class_counts = {}, {}
 
         for data, targets in self.loader:
             data, targets = data.to(u.DEVICE), targets.to(u.DEVICE)
@@ -122,10 +122,6 @@ class Proximity:
         percentage_same_class_knn = []
         percentage_other_class_knn = []
 
-        avg_same_class_curvatures = []
-        avg_other_class_curvatures = []
-        avg_all_class_curvatures = []
-
         # Prepare KNN classifier
         flattened_samples = self.samples.view(self.samples.size(0), -1).cpu().numpy()
         knn = NearestNeighbors(n_neighbors=self.k)
@@ -158,15 +154,17 @@ class Proximity:
             # Exclude the sample itself (index 0) from the KNN distances
             knn_distances = distances[1:]
             knn_labels = self.labels[indices[1:]].cpu().numpy()
+            knn_same_class_indices = knn_labels == target.item()
+            knn_other_class_indices = knn_labels != target.item()
 
             # Closest distances to the same and other class samples + ratio
-            if np.any(knn_labels == target.item()):
-                min_same_class_dist = np.min(knn_distances[knn_labels == target.item()])
+            if np.any(knn_same_class_indices):
+                min_same_class_dist = np.min(knn_distances[knn_same_class_indices])
             else:
                 min_same_class_dist = np.inf
 
-            if np.any(knn_labels != target.item()):
-                min_other_class_dist = np.min(knn_distances[knn_labels != target.item()])
+            if np.any(knn_other_class_indices):
+                min_other_class_dist = np.min(knn_distances[knn_same_class_indices])
             else:
                 min_other_class_dist = np.inf
 
@@ -175,10 +173,10 @@ class Proximity:
             closest_distance_ratios.append(min_same_class_dist / min_other_class_dist)
 
             # Average distances to same, other, and all samples in kNN
-            avg_same_dist = np.mean(knn_distances[knn_labels == target.item()]) if np.any(
-                knn_labels == target.item()) else np.inf
-            avg_other_dist = np.mean(knn_distances[knn_labels != target.item()]) if np.any(
-                knn_labels != target.item()) else np.inf
+            avg_same_dist = np.mean(knn_distances[knn_same_class_indices]) if np.any(
+                knn_same_class_indices) else np.inf
+            avg_other_dist = np.mean(knn_distances[knn_other_class_indices]) if np.any(
+                knn_other_class_indices) else np.inf
             avg_all_dist = np.mean(knn_distances)
 
             avg_same_class_distances.append(avg_same_dist)
@@ -187,24 +185,8 @@ class Proximity:
             avg_distance_ratios.append(avg_same_dist / avg_other_dist)
 
             # Compute the percentage of kNN samples from same and other classes
-            same_class_count = np.sum(knn_labels == target.item())
-            other_class_count = np.sum(knn_labels != target.item())
-
-            percentage_same_class_knn.append(same_class_count / self.k)
-            percentage_other_class_knn.append(other_class_count / self.k)
-
-            # Compute the average curvature of the K-nearest neighbors
-            knn_curvatures_all = [self.curvatures[i] for i in indices[1:]]
-            knn_curvatures_same = [self.curvatures[i] for i in indices[1:] if self.labels[i - 1] == target.item()]
-            knn_curvatures_other = [self.curvatures[i] for i in indices[1:] if self.labels[i - 1] != target.item()]
-
-            avg_all_curv = np.mean(knn_curvatures_all)
-            avg_same_curv = np.mean(knn_curvatures_same) if knn_curvatures_same else np.inf
-            avg_other_curv = np.mean(knn_curvatures_other) if knn_curvatures_other else np.array(0.0)
-
-            avg_all_class_curvatures.append(avg_all_curv)
-            avg_same_class_curvatures.append(avg_same_curv)
-            avg_other_class_curvatures.append(avg_other_curv)
+            percentage_same_class_knn.append(np.sum(knn_same_class_indices) / self.k)
+            percentage_other_class_knn.append(np.sum(knn_other_class_indices) / self.k)
 
         return (
             same_centroid_dists,
@@ -218,10 +200,7 @@ class Proximity:
             avg_all_class_distances,
             avg_distance_ratios,
             percentage_same_class_knn,
-            percentage_other_class_knn,
-            avg_same_class_curvatures,
-            avg_other_class_curvatures,
-            avg_all_class_curvatures
+            percentage_other_class_knn
         )
 
 
