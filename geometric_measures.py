@@ -164,7 +164,7 @@ class Proximity:
                 min_same_class_dist = np.inf
 
             if np.any(knn_other_class_indices):
-                min_other_class_dist = np.min(knn_distances[knn_same_class_indices])
+                min_other_class_dist = np.min(knn_distances[knn_other_class_indices])
             else:
                 min_other_class_dist = np.inf
 

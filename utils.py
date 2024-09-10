@@ -9,7 +9,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
 from torchvision import datasets, transforms
 
-from neural_networks import LeNet
+from neural_networks import LeNet, SimpleMLP
 
 
 EPSILON = 0.000000001  # cutoff for the computation of the variance in the standardisation
@@ -24,8 +24,9 @@ MODEL_SAVE_DIR = "models/"
 ACCURACIES_SAVE_DIR = "accuracies/"
 DIVISIONS_SAVE_DIR = 'dataset_divisions/'
 CORRELATIONS_SAVE_DIR = 'correlations/'
+CLASS_BIAS_SAVE_DIR = 'class_bias/'
 for directory in [HARD_IMBALANCE_DIR, CONFIDENCES_SAVE_DIR, DATA_SAVE_DIR, MODEL_SAVE_DIR, ACCURACIES_SAVE_DIR,
-                  DIVISIONS_SAVE_DIR, CORRELATIONS_SAVE_DIR]:
+                  DIVISIONS_SAVE_DIR, CORRELATIONS_SAVE_DIR, CLASS_BIAS_SAVE_DIR]:
     os.makedirs(directory, exist_ok=True)
 
 
@@ -53,13 +54,19 @@ def load_data(filename: str):
         return pickle.load(f)
 
 
-def initialize_models(dataset_name: str):
+def initialize_models(dataset_name: str, model_type: str):
     if dataset_name == 'CIFAR10':
         # Create three instances of each model type with fresh initializations
-        model = torch.hub.load("chenyaofo/pytorch-cifar-models", "cifar10_resnet56", pretrained=False).to(DEVICE)
+        if model_type == 'simple':
+            model = torch.hub.load("chenyaofo/pytorch-cifar-models", "cifar10_resnet20", pretrained=False).to(DEVICE)
+        else:
+            model = torch.hub.load("chenyaofo/pytorch-cifar-models", "cifar10_resnet56", pretrained=False).to(DEVICE)
         optimizer = Adam(model.parameters(), lr=0.01, betas=(0.9, 0.999), weight_decay=1e-4)
     else:
-        model = LeNet().to(DEVICE)
+        if model_type == 'simple':
+            model = SimpleMLP().to(DEVICE)
+        else:
+            model = LeNet().to(DEVICE)
         optimizer = Adam(model.parameters(), lr=0.001)
     return model, optimizer
 

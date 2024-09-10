@@ -24,4 +24,19 @@ class LeNet(nn.Module):
         x = self.fc(x)
         return x
 
-# TODO: Implement simple Neural Network for MNIST and repeat experiments to show results are model-agnostic
+
+class SimpleMLP(nn.Module):
+    def __init__(self):
+        super(SimpleMLP, self).__init__()
+        self.fc = nn.Sequential(
+            nn.Linear(28*28, 20),
+            nn.ReLU(),
+            nn.Linear(20, 20),
+            nn.ReLU(),
+            nn.Linear(20, 10)
+        )
+
+    def forward(self, x):
+        x = x.view(-1, 28*28)
+        x = self.fc(x)
+        return x
