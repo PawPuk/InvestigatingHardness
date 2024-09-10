@@ -610,18 +610,17 @@ def main(dataset_name: str, models_count: int, training: str, threshold: float, 
     # Define file paths for saving and loading cached results
     accuracies_file = f"{u.HARD_IMBALANCE_DIR}{dataset_name}_avg_class_accuracies.pkl"
     proximity_file = f"{u.HARD_IMBALANCE_DIR}{training}{dataset_name}_proximity_indicators.pkl"
+    num_classes = len(np.unique(training_labels))
+    metric_abbreviations = [
+        'SameCentroidDist', 'OtherCentroidDist', 'CentroidDistRatio', 'Same1NNDist', 'Other1NNDist', '1NNRatioDist',
+        'AvgSame40NNDist', 'AvgOther40NNDist', 'AvgAll40NNDist', 'Avg40NNDistRatio', '40NNPercSame', '40NNPercOther'
+    ]
 
     # Load the dataset
     if training == 'full':
         training_dataset = u.load_full_data_and_normalize(dataset_name)
     else:
         training_dataset, _ = u.load_data_and_normalize(dataset_name)
-    training_labels = training_dataset.tensors[1].numpy()
-    num_classes = len(np.unique(training_labels))
-    metric_abbreviations = [
-        'SameCentroidDist', 'OtherCentroidDist', 'CentroidDistRatio', 'Same1NNDist', 'Other1NNDist', '1NNRatioDist',
-        'AvgSame40NNDist', 'AvgOther40NNDist', 'AvgAll40NNDist', 'Avg40NNDistRatio', '40NNPercSame', '40NNPercOther'
-    ]
 
     if os.path.exists(accuracies_file):
         print('Loading accuracies.')
@@ -638,6 +637,7 @@ def main(dataset_name: str, models_count: int, training: str, threshold: float, 
         proximity_metrics = compute_proximity_metrics(loader, k2)
         u.save_data(proximity_metrics, proximity_file)
 
+    training_labels = training_dataset.tensors[1].numpy()
     all_metrics = proximity_metrics
     class_averages = compute_class_averages_of_metrics(all_metrics, training_labels)
     invert_metrics = [False, True, False, False, True, False, False, True, False, False, True, False]
@@ -727,7 +727,7 @@ if __name__ == '__main__':
                              ' (full), or the ones trained only on the training set (part).')
     parser.add_argument('--threshold', type=float, default=0.1,
                         help='The percentage of the most extreme (hardest) samples that will be considered as hard.')
-    parser.add_argument('--k2', type=int, default=10, help='k parameter for the kNN in proximity computations.')
+    parser.add_argument('--k2', type=int, default=40, help='k parameter for the kNN in proximity computations.')
     args = parser.parse_args()
 
     main(**vars(args))
