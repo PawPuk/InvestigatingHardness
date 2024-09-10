@@ -9,6 +9,8 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
 from torchvision import datasets, transforms
 
+from neural_networks import LeNet
+
 
 EPSILON = 0.000000001  # cutoff for the computation of the variance in the standardisation
 EPOCHS = 10
@@ -51,6 +53,17 @@ def load_data(filename: str):
         return pickle.load(f)
 
 
+def initialize_models(dataset_name: str):
+    if dataset_name == 'CIFAR10':
+        # Create three instances of each model type with fresh initializations
+        model = torch.hub.load("chenyaofo/pytorch-cifar-models", "cifar10_resnet56", pretrained=False).to(DEVICE)
+        optimizer = Adam(model.parameters(), lr=0.01, betas=(0.9, 0.999), weight_decay=1e-4)
+    else:
+        model = LeNet().to(DEVICE)
+        optimizer = Adam(model.parameters(), lr=0.001)
+    return model, optimizer
+
+
 def calculate_mean_std(accuracies: List[float]) -> Tuple[float, float]:
     return np.mean(accuracies), np.std(accuracies)
 
@@ -82,10 +95,8 @@ def load_full_data_and_normalize(dataset_name: str) -> TensorDataset:
     data_vars = torch.sqrt(torch.var(full_data, dim=(0, 2, 3)) / 255.0 ** 2 + EPSILON)
     # Apply the calculated normalization to the subset
     normalize_transform = transforms.Normalize(mean=data_means, std=data_vars)
-    # TODO: maybe weird results come from applying normalization to data when computing metrics (not for training)...
     normalized_subset_data = normalize_transform(full_data / 255.0)  # TODO: see the impact of removing normalization
     return TensorDataset(normalized_subset_data, full_targets)
-
 
 def load_data_and_normalize(dataset_name: str) -> Tuple[TensorDataset, TensorDataset]:
     """
