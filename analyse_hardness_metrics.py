@@ -314,8 +314,8 @@ def extract_extreme_samples_threshold(metrics: List[List[float]], labels: List[i
                             first_division_point, second_division_point, dataset_name, invert[metric_idx],
                             hard_threshold_percent, training)
 
-    return (adaptive_easy_samples, adaptive_hard_samples, adaptive_easy_distributions, adaptive_hard_distributions,
-            hard_easy_samples, hard_hard_samples, hard_easy_distributions, hard_hard_distributions)
+    return (adaptive_easy_samples, adaptive_hard_samples, hard_easy_samples, hard_hard_samples), \
+        (adaptive_easy_distributions, adaptive_hard_distributions, hard_easy_distributions, hard_hard_distributions)
 
 
 def compare_metrics_to_class_accuracies(class_distributions, avg_class_accuracies, num_classes, pcc_output_filename,
@@ -557,7 +557,7 @@ def compute_easy_hard_ratios(dataset_name: str, easy_indices: List[np.ndarray], 
     print(df.to_string(index=False))
 
 
-def plot_correlation_metrics(metric_abbreviations, iou_values, spearman_values, kendall_values, output_filename):
+def plot_consistency_metrics(metric_abbreviations, iou_values, spearman_values, kendall_values, output_filename):
     """
     Plot IoU, Spearman's, and Kendall's Tau for each metric.
 
@@ -606,112 +606,96 @@ def compute_iou(adaptive_indices, full_indices):
     return iou
 
 
-def main(dataset_name: str, models_count: int, training: str, threshold: float, k2: int):
+def main(dataset_name: str):
     # Define file paths for saving and loading cached results
-    accuracies_file = f"{u.HARD_IMBALANCE_DIR}{dataset_name}_avg_class_accuracies.pkl"
-    proximity_file = f"{u.HARD_IMBALANCE_DIR}{training}{dataset_name}_proximity_indicators.pkl"
-    num_classes = len(np.unique(training_labels))
+    full_accuracies_file = f"{u.HARD_IMBALANCE_DIR}full{dataset_name}_avg_class_accuracies.pkl"
+    full_proximity_file = f"{u.HARD_IMBALANCE_DIR}full{dataset_name}_proximity_indicators.pkl"
+    part_proximity_file = f"{u.HARD_IMBALANCE_DIR}part{dataset_name}_proximity_indicators.pkl"
     metric_abbreviations = [
         'SameCentroidDist', 'OtherCentroidDist', 'CentroidDistRatio', 'Same1NNDist', 'Other1NNDist', '1NNRatioDist',
         'AvgSame40NNDist', 'AvgOther40NNDist', 'AvgAll40NNDist', 'Avg40NNDistRatio', '40NNPercSame', '40NNPercOther'
     ]
 
-    # Load the dataset
-    if training == 'full':
-        training_dataset = u.load_full_data_and_normalize(dataset_name)
-    else:
-        training_dataset, _ = u.load_data_and_normalize(dataset_name)
+    # Load the dataset and metrics
+    full_training_dataset = u.load_full_data_and_normalize(dataset_name)
+    part_training_dataset, _ = u.load_data_and_normalize(dataset_name)
+    full_avg_class_accuracies = u.load_data(full_accuracies_file)
+    full_avg_class_accuracies = np.sum(full_avg_class_accuracies, axis=0) / len(full_avg_class_accuracies)
+    full_proximity_metrics = u.load_data(full_proximity_file)
+    part_proximity_metrics = u.load_data(part_proximity_file)
 
-    if os.path.exists(accuracies_file):
-        print('Loading accuracies.')
-        avg_class_accuracies = u.load_data(accuracies_file)
-    else:
-        raise Exception('Train an ensemble via `train_ensembles.py --training full` before running this program.')
-    loader = DataLoader(training_dataset, batch_size=len(training_dataset), shuffle=False)
-
-    if os.path.exists(proximity_file):
-        print('Loading proximities.')
-        proximity_metrics = u.load_data(proximity_file)
-    else:
-        print('Calculating proximities.')
-        proximity_metrics = compute_proximity_metrics(loader, k2)
-        u.save_data(proximity_metrics, proximity_file)
-
-    training_labels = training_dataset.tensors[1].numpy()
-    all_metrics = proximity_metrics
-    class_averages = compute_class_averages_of_metrics(all_metrics, training_labels)
+    full_training_labels = full_training_dataset.tensors[1].numpy()
+    part_training_labels = part_training_dataset.tensors[1].numpy()
+    num_classes = len(np.unique(full_training_labels))
+    full_class_averages = compute_class_averages_of_metrics(full_proximity_metrics, full_training_labels)
     invert_metrics = [False, True, False, False, True, False, False, True, False, False, True, False]
 
     # Extract the hardest samples for each metric and compute their class distributions
-    adaptive_easy_indices, adaptive_hard_indices, adaptive_easy_distributions, adaptive_hard_distributions, \
-        fixed_easy_indices, fixed_hard_indices, fixed_easy_distributions, fixed_hard_distributions = \
-        extract_extreme_samples_threshold(all_metrics, training_labels, dataset_name, invert_metrics, training)
+    full_indices, full_distributions = extract_extreme_samples_threshold(full_proximity_metrics, full_training_labels,
+                                                                         dataset_name, invert_metrics, 'full')
+    part_indices, part_distributions = extract_extreme_samples_threshold(part_proximity_metrics, part_training_labels,
+                                                                         dataset_name, invert_metrics, 'part')
 
     # Compute and visualize the correlation heatmaps
     # compute_correlation_heatmaps(adaptive_easy_indices, adaptive_hard_indices, 'adaptive')
     # compute_correlation_heatmaps(fixed_easy_indices, fixed_hard_indices, 'fixed')
 
-    if training == 'full':
-        # Compare and plot all metrics against class-level accuracies
-        compare_metrics_to_class_accuracies(adaptive_easy_distributions, avg_class_accuracies, num_classes,
+    # Measure the correlation between the distributions of hard samples and class-level accuracies
+    for training in ['full', 'part']:
+        distributions = [full_distributions, part_distributions][training == 'part']
+        compare_metrics_to_class_accuracies(distributions[0], full_avg_class_accuracies, num_classes,
                                             f'{training}{dataset_name}_adaptive_easyPCC.pdf',
                                             f'{training}{dataset_name}_adaptive_easySRC.pdf')
-        compare_metrics_to_class_accuracies(adaptive_hard_distributions, avg_class_accuracies, num_classes,
+        compare_metrics_to_class_accuracies(distributions[1], full_avg_class_accuracies, num_classes,
                                             f'{training}{dataset_name}_adaptive_hardPCC.pdf',
                                             f'{training}{dataset_name}_adaptive_hardSRC.pdf')
-        compare_metrics_to_class_accuracies(fixed_easy_distributions, avg_class_accuracies, num_classes,
+        compare_metrics_to_class_accuracies(distributions[2], full_avg_class_accuracies, num_classes,
                                             f'{training}{dataset_name}_fixed_easyPCC.pdf',
                                             f'{training}{dataset_name}_fixed_easySRC.pdf')
-        compare_metrics_to_class_accuracies(fixed_hard_distributions, avg_class_accuracies, num_classes,
+        compare_metrics_to_class_accuracies(distributions[3], full_avg_class_accuracies, num_classes,
                                             f'{training}{dataset_name}_fixed_hardPCC.pdf',
                                             f'{training}{dataset_name}_fixed_hardSRC.pdf')
-        compare_metrics_to_class_accuracies(class_averages, avg_class_accuracies, num_classes,
+        compare_metrics_to_class_accuracies(full_class_averages, full_avg_class_accuracies, num_classes,
                                             f'{training}{dataset_name}_avgPCC.pdf',
                                             f'{training}{dataset_name}_avgSRC.pdf')
-        # compute_easy_hard_ratios(dataset_name, adaptive_easy_indices, adaptive_hard_indices)
-    else:
-        full_easy_indices = u.load_data(f'{u.DIVISIONS_SAVE_DIR}/full{dataset_name}_adaptive_easy_indices.pkl')
-        full_hard_indices = u.load_data(f'{u.DIVISIONS_SAVE_DIR}/full{dataset_name}_adaptive_hard_indices.pkl')
 
-        iou_values_easy = []
-        iou_values_hard = []
-        spearman_values_easy = []
-        spearman_values_hard = []
-        kendall_values_easy = []
-        kendall_values_hard = []
+    # Measure the ratio of easy:hard samples in the training and test splits proposed by PyTorch
+    compute_easy_hard_ratios(dataset_name, full_indices[0], full_indices[1])
 
-        for metric_idx, (adaptive_easy, adaptive_hard) in enumerate(zip(adaptive_easy_indices, adaptive_hard_indices)):
-            # Compute IoU
-            easy_iou = compute_iou(adaptive_easy, full_easy_indices[metric_idx])
-            hard_iou = compute_iou(adaptive_hard, full_hard_indices[metric_idx])
+    iou_values_easy = []
+    iou_values_hard = []
+    spearman_values_easy = []
+    spearman_values_hard = []
+    kendall_values_easy = []
+    kendall_values_hard = []
 
-            iou_values_easy.append(easy_iou)
-            iou_values_hard.append(hard_iou)
+    for metric_idx, (adaptive_easy, adaptive_hard) in enumerate(zip(part_indices[0], part_indices[1])):
+        # Compute IoU
+        easy_iou = compute_iou(adaptive_easy, full_indices[0][metric_idx])
+        hard_iou = compute_iou(adaptive_hard, full_indices[1][metric_idx])
+        iou_values_easy.append(easy_iou)
+        iou_values_hard.append(hard_iou)
 
-            # Compute Spearman's
-            easy_spearman, _ = spearmanr(adaptive_easy, full_easy_indices[metric_idx])
-            hard_spearman, _ = spearmanr(adaptive_hard, full_hard_indices[metric_idx])
+        # Compute Spearman's
+        easy_spearman, _ = spearmanr(adaptive_easy, full_indices[0][metric_idx])
+        hard_spearman, _ = spearmanr(adaptive_hard, full_indices[1][metric_idx])
+        spearman_values_easy.append(easy_spearman)
+        spearman_values_hard.append(hard_spearman)
 
-            spearman_values_easy.append(easy_spearman)
-            spearman_values_hard.append(hard_spearman)
+        # Compute Kendall's Tau
+        easy_kendall, _ = kendalltau(adaptive_easy, full_indices[0][metric_idx])
+        hard_kendall, _ = kendalltau(adaptive_hard, full_indices[1][metric_idx])
+        kendall_values_easy.append(easy_kendall)
+        kendall_values_hard.append(hard_kendall)
 
-            # Compute Kendall's Tau
-            easy_kendall, _ = kendalltau(adaptive_easy, full_easy_indices[metric_idx])
-            hard_kendall, _ = kendalltau(adaptive_hard, full_hard_indices[metric_idx])
+    # Call the plotting function
+    plot_consistency_metrics(metric_abbreviations, iou_values_easy, spearman_values_easy, kendall_values_easy,
+                             f'{u.CONSISTENCY_SAVE_DIR}{dataset_name}_easy_consistency.pdf')
+    plot_consistency_metrics(metric_abbreviations, iou_values_hard, spearman_values_hard, kendall_values_hard,
+                             f'{u.CONSISTENCY_SAVE_DIR}{dataset_name}_hard_consistency.pdf')
 
-            kendall_values_easy.append(easy_kendall)
-            kendall_values_hard.append(hard_kendall)
-
-        # Call the plotting function
-        plot_correlation_metrics(metric_abbreviations, iou_values_easy, spearman_values_easy, kendall_values_easy,
-                                 f'{training}{dataset_name}_easy_correlations.pdf')
-        plot_correlation_metrics(metric_abbreviations, iou_values_hard, spearman_values_hard, kendall_values_hard,
-                                 f'{training}{dataset_name}_hard_correlations.pdf')
-
-    u.save_data(adaptive_easy_indices, f'{u.DIVISIONS_SAVE_DIR}/{training}{dataset_name}_adaptive_easy_indices.pkl')
-    u.save_data(adaptive_hard_indices, f'{u.DIVISIONS_SAVE_DIR}/{training}{dataset_name}_adaptive_hard_indices.pkl')
-    u.save_data(fixed_easy_indices, f'{u.DIVISIONS_SAVE_DIR}/{training}{dataset_name}_fixed_easy_indices.pkl')
-    u.save_data(fixed_hard_indices, f'{u.DIVISIONS_SAVE_DIR}/{training}{dataset_name}_fixed_hard_indices.pkl')
+    u.save_data(full_indices, f'{u.DIVISIONS_SAVE_DIR}/full{dataset_name}_indices.pkl')
+    u.save_data(part_indices, f'{u.DIVISIONS_SAVE_DIR}/part{dataset_name}_indices.pkl')
 
 
 if __name__ == '__main__':
@@ -721,13 +705,6 @@ if __name__ == '__main__':
     )
     parser.add_argument('--dataset_name', type=str, default='MNIST',
                         help='Name of the dataset (MNIST, CIFAR10, CIFAR100).')
-    parser.add_argument('--models_count', type=int, default=20, help='Number of models in the ensemble.')
-    parser.add_argument('--training', type=str, choices=['full', 'part'], default='full',
-                        help='Indicates which models to choose for evaluations - the ones trained on the entire dataset'
-                             ' (full), or the ones trained only on the training set (part).')
-    parser.add_argument('--threshold', type=float, default=0.1,
-                        help='The percentage of the most extreme (hardest) samples that will be considered as hard.')
-    parser.add_argument('--k2', type=int, default=40, help='k parameter for the kNN in proximity computations.')
     args = parser.parse_args()
 
     main(**vars(args))
