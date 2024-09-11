@@ -108,7 +108,7 @@ def find_division_points_for_third_family(second_derivatives: np.ndarray, window
 
 def plot_metric_results(metric_idx: int, sorted_normalized_metric: np.ndarray, avg_gradients: List[np.ndarray],
                         avg_second_gradients: np.ndarray, first_division_point: int, second_division_point: int,
-                        dataset_name: str, invert: bool, hard_threshold_percent: float, training: str):
+                        dataset_name: str, invert: bool, hard_threshold_percent: float, training: str, model_type: str):
     """Plot the results with division points marked and areas colored as easy, medium, and hard, along with hard
     thresholds."""
     fig, axes = plt.subplots(1, 3, figsize=(20, 6))
@@ -185,15 +185,15 @@ def plot_metric_results(metric_idx: int, sorted_normalized_metric: np.ndarray, a
     # Save plot
     output_dir = 'metric_plots'
     os.makedirs(output_dir, exist_ok=True)
-    plt.savefig(os.path.join(output_dir, f'{training}{dataset_name}_metric_{metric_idx + 1}_distribution_gradients_'
-                                         f'second_derivatives.pdf'))
-    plt.savefig(os.path.join(output_dir, f'{training}{dataset_name}_metric_{metric_idx + 1}_distribution_gradients_'
-                                         f'second_derivatives.png'))
+    plt.savefig(os.path.join(output_dir, f'{training}{model_type}{dataset_name}_metric_{metric_idx + 1}_'
+                                         f'distribution_gradients_.pdf'))
+    plt.savefig(os.path.join(output_dir, f'{training}{model_type}{dataset_name}_metric_{metric_idx + 1}_'
+                                         f'distribution_gradients_.png'))
 
     plt.close()
 
 
-def extract_extreme_samples_threshold(metrics: List[List[float]], labels: List[int], dataset_name: str,
+def extract_extreme_samples_threshold(metrics: List[List[float]], labels: List[int], dataset_name: str, model_type: str,
                                       invert: List[bool], training: str, hard_threshold_percent: float = 0.05):
     """Extract easy and hard samples using both adaptive and hard thresholds, returning their indices and
     distributions."""
@@ -240,7 +240,7 @@ def extract_extreme_samples_threshold(metrics: List[List[float]], labels: List[i
             avg_gradients.append(np.mean(gradients[start:end]))
 
         # Smooth the first derivative using Savitzky-Golay filter
-        smoothed_avg_gradients = savgol_filter(avg_gradients, window_length=1000, polyorder=2)
+        smoothed_avg_gradients = savgol_filter(avg_gradients, window_length=1001, polyorder=2)
 
         # Compute the second derivative (gradient of the smoothed first derivative)
         second_derivatives = np.gradient(smoothed_avg_gradients)
@@ -312,7 +312,7 @@ def extract_extreme_samples_threshold(metrics: List[List[float]], labels: List[i
         # Plot results and pass hard thresholds to the plotting function
         plot_metric_results(metric_idx, sorted_normalized_metric, avg_gradients, second_derivatives,
                             first_division_point, second_division_point, dataset_name, invert[metric_idx],
-                            hard_threshold_percent, training)
+                            hard_threshold_percent, training, model_type)
 
     return (adaptive_easy_samples, adaptive_hard_samples, hard_easy_samples, hard_hard_samples), \
         (adaptive_easy_distributions, adaptive_hard_distributions, hard_easy_distributions, hard_hard_distributions)
@@ -338,9 +338,8 @@ def compare_metrics_to_class_accuracies(class_distributions, avg_class_accuracie
     p_values_spearman = []
 
     metric_abbreviations = [
-        'SameCentroidDist', 'OtherCentroidDist', 'CentroidDistRatio', 'Same1NN', 'Other1NN', '1NNRatio',
-        'AvgSame40NN', 'AvgOther40NN', 'AvgAll40NN', 'Avg40NNRatio', '40NNPercSame', '40NNPercOther',
-        'AvgSame40NNCurv', 'AvgOther40NNCurv', 'AvgAll40NNCurv', 'GaussCurv', 'MeanCurv'
+        'SameCentroidDist', 'OtherCentroidDist', 'CentroidDistRatio', 'Same1NNDist', 'Other1NNDist', '1NNRatioDist',
+        'AvgSame40NNDist', 'AvgOther40NNDist', 'AvgAll40NNDist', 'Avg40NNDistRatio', '40NNPercSame', '40NNPercOther'
     ]  # Abbreviations for each metric to keep plot readable.
 
     # Compute both PCC and Spearman for each metric
@@ -602,7 +601,7 @@ def compute_iou(adaptive_indices, full_indices):
     adaptive_set = set(adaptive_indices)
     full_set = set(full_indices)
     overlap_count = len(adaptive_set.intersection(full_set))
-    iou = (overlap_count / len(adaptive_set)) * 100
+    iou = (overlap_count / len(adaptive_set))
     return iou
 
 
@@ -632,9 +631,11 @@ def main(dataset_name: str, model_type: str):
 
     # Extract the hardest samples for each metric and compute their class distributions
     full_indices, full_distributions = extract_extreme_samples_threshold(full_proximity_metrics, full_training_labels,
-                                                                         dataset_name, invert_metrics, 'full')
+                                                                         dataset_name, model_type, invert_metrics,
+                                                                         'full')
     part_indices, part_distributions = extract_extreme_samples_threshold(part_proximity_metrics, part_training_labels,
-                                                                         dataset_name, invert_metrics, 'part')
+                                                                         dataset_name, model_type, invert_metrics,
+                                                                         'part')
 
     # Compute and visualize the correlation heatmaps
     # compute_correlation_heatmaps(adaptive_easy_indices, adaptive_hard_indices, 'adaptive')
@@ -676,6 +677,16 @@ def main(dataset_name: str, model_type: str):
         iou_values_easy.append(easy_iou)
         iou_values_hard.append(hard_iou)
 
+        # Adjust the easy and hard indices obtained via full and part setting to have the same length
+        if len(adaptive_easy) > len(full_indices[0][metric_idx]):
+            adaptive_easy = adaptive_easy[:len(full_indices[0][metric_idx])]
+        else:
+            full_indices[0][metric_idx] = full_indices[0][metric_idx][:len(adaptive_easy)]
+        if len(adaptive_hard) > len(full_indices[1][metric_idx]):
+            adaptive_hard = adaptive_hard[-len(full_indices[1][metric_idx]):]
+        else:
+            full_indices[1][metric_idx] = full_indices[1][metric_idx][-len(adaptive_hard):]
+
         # Compute Spearman's
         easy_spearman, _ = spearmanr(adaptive_easy, full_indices[0][metric_idx])
         hard_spearman, _ = spearmanr(adaptive_hard, full_indices[1][metric_idx])
@@ -687,15 +698,16 @@ def main(dataset_name: str, model_type: str):
         hard_kendall, _ = kendalltau(adaptive_hard, full_indices[1][metric_idx])
         kendall_values_easy.append(easy_kendall)
         kendall_values_hard.append(hard_kendall)
+        # TODO: add p-values and incorporate them into the plot
 
     # Call the plotting function
     plot_consistency_metrics(metric_abbreviations, iou_values_easy, spearman_values_easy, kendall_values_easy,
-                             f'{u.CONSISTENCY_SAVE_DIR}{dataset_name}_easy_consistency.pdf')
+                             f'{u.CONSISTENCY_SAVE_DIR}{model_type}{dataset_name}_easy_consistency.pdf')
     plot_consistency_metrics(metric_abbreviations, iou_values_hard, spearman_values_hard, kendall_values_hard,
-                             f'{u.CONSISTENCY_SAVE_DIR}{dataset_name}_hard_consistency.pdf')
+                             f'{u.CONSISTENCY_SAVE_DIR}{model_type}{dataset_name}_hard_consistency.pdf')
 
-    u.save_data(full_indices, f'{u.DIVISIONS_SAVE_DIR}/full{dataset_name}_indices.pkl')
-    u.save_data(part_indices, f'{u.DIVISIONS_SAVE_DIR}/part{dataset_name}_indices.pkl')
+    u.save_data(full_indices, f'{u.DIVISIONS_SAVE_DIR}/full{model_type}{dataset_name}_indices.pkl')
+    u.save_data(part_indices, f'{u.DIVISIONS_SAVE_DIR}/part{model_type}{dataset_name}_indices.pkl')
 
 
 if __name__ == '__main__':

@@ -12,21 +12,22 @@ import utils as u
 
 
 class HardnessImbalanceMeasurer:
-    def __init__(self, dataset_name: str, models_count: int, training: str):
+    def __init__(self, dataset_name: str, models_count: int, training: str, model_type: str):
         self.dataset_name = dataset_name
         self.models_count = models_count
         self.training = training
-        self.easy_indices = u.load_data(f'{u.DIVISIONS_SAVE_DIR}{training}{self.dataset_name}_fixed_easy_indices.pkl')
-        self.hard_indices = u.load_data(f'{u.DIVISIONS_SAVE_DIR}{training}{self.dataset_name}_fixed_hard_indices.pkl')
+        self.easy_indices, self.hard_indices, _, _ = u.load_data(
+            f'{u.DIVISIONS_SAVE_DIR}/{training}{dataset_name}_indices.pkl')
         self.models = []
         for i in range(self.models_count):
-            model = LeNet().to(u.DEVICE)
-            model_file = f"{u.MODEL_SAVE_DIR}{self.training}{self.dataset_name}_{self.models_count}_ensemble_{i}.pth"
+            model, _ = u.initialize_models(dataset_name, model_type).to(u.DEVICE)
+            model_file = f"{u.MODEL_SAVE_DIR}{self.training}{self.dataset_name}_{self.models_count}_" \
+                         f"{model_type}ensemble_{i}.pth"
             model.load_state_dict(torch.load(model_file, map_location=u.DEVICE))
             self.models.append(model)
         if self.training == 'full':
             training_dataset = u.load_full_data_and_normalize(self.dataset_name)
-            test_dataset = training_dataset
+            test_dataset = training_dataset  # TODO: Do I have to use deepcopy.copy() here?
             self.dataset_size = len(training_dataset)
         else:
             training_dataset, test_dataset = u.load_data_and_normalize(self.dataset_name)
@@ -66,38 +67,6 @@ class HardnessImbalanceMeasurer:
 
         accuracy = correct / total if total > 0 else None  # Using None, as this should not occur.
         return accuracy
-
-    def measure_and_visualize_hardness_based_imbalance(self):
-        """Test an ensemble of models on the dataset, returning accuracies for each metric."""
-        accuracies = []
-        metric_abbreviations = [
-            'SameCentroidDist', 'OtherCentroidDist', 'CentroidDistRatio', 'Same1NNDist', 'Other1NNDist', '1NNRatioDist',
-            'AvgSame40NNDist', 'AvgOther40NNDist', 'AvgAll40NNDist', 'Avg40NNDistRatio', '40NNPercSame',
-            '40NNPercOther', 'AvgSame40NNCurv', 'AvgOther40NNCurv', 'AvgAll40NNCurv', 'GaussCurv', 'MeanCurv'
-        ]
-
-        for metric_idx in tqdm(range(len(self.easy_indices)), desc='Iterating through metrics'):
-            metric_easy_indices = self.easy_indices[metric_idx]
-            metric_hard_indices = self.hard_indices[metric_idx]
-
-            all_accuracies, easy_accuracies, hard_accuracies = [], [], []
-
-            for model in self.models[:3]:
-                print('start', self.dataset_size)
-                all_accuracies.append(self.measure_imbalance_on_one_model(model, list(range(self.dataset_size))))
-                easy_accuracies.append(self.measure_imbalance_on_one_model(model, metric_easy_indices))
-                hard_accuracies.append(self.measure_imbalance_on_one_model(model, metric_hard_indices))
-
-            accuracies.append({
-                'metric': metric_idx,
-                'mean_acc_all': np.mean(all_accuracies),
-                'std_acc_all': np.std(all_accuracies),
-                'mean_acc_easy': np.mean(easy_accuracies),
-                'std_acc_easy': np.std(easy_accuracies),
-                'mean_acc_hard': np.mean(hard_accuracies),
-                'std_acc_hard': np.std(hard_accuracies)
-            })
-        self.plot_error_rates(accuracies, metric_abbreviations)
 
     @staticmethod
     def plot_error_rates(accuracies: List[dict], metric_abbreviations: List[str]) -> None:
@@ -149,6 +118,36 @@ class HardnessImbalanceMeasurer:
         plt.savefig('hardness_based_imbalances.png')
         plt.show()
 
+    def measure_and_visualize_hardness_based_imbalance(self):
+        """Test an ensemble of models on the dataset, returning accuracies for each metric."""
+        accuracies = []
+        metric_abbreviations = [
+            'SameCentroidDist', 'OtherCentroidDist', 'CentroidDistRatio', 'Same1NNDist', 'Other1NNDist', '1NNRatioDist',
+            'AvgSame40NNDist', 'AvgOther40NNDist', 'AvgAll40NNDist', 'Avg40NNDistRatio', '40NNPercSame', '40NNPercOther'
+        ]
+
+        for metric_idx in tqdm(range(len(self.easy_indices)), desc='Iterating through metrics'):
+            metric_easy_indices = self.easy_indices[metric_idx]
+            metric_hard_indices = self.hard_indices[metric_idx]
+
+            all_accuracies, easy_accuracies, hard_accuracies = [], [], []
+
+            for model in self.models:
+                all_accuracies.append(self.measure_imbalance_on_one_model(model, list(range(self.dataset_size))))
+                easy_accuracies.append(self.measure_imbalance_on_one_model(model, metric_easy_indices))
+                hard_accuracies.append(self.measure_imbalance_on_one_model(model, metric_hard_indices))
+            # TODO: make a similar figure for imbalance as for the class bias to measure its consistency
+            accuracies.append({
+                'metric': metric_idx,
+                'mean_acc_all': np.mean(all_accuracies),
+                'std_acc_all': np.std(all_accuracies),
+                'mean_acc_easy': np.mean(easy_accuracies),
+                'std_acc_easy': np.std(easy_accuracies),
+                'mean_acc_hard': np.mean(hard_accuracies),
+                'std_acc_hard': np.std(hard_accuracies)
+            })
+        self.plot_error_rates(accuracies, metric_abbreviations)
+
 
 if __name__ == "__main__":
     import argparse
@@ -161,7 +160,6 @@ if __name__ == "__main__":
     parser.add_argument('--training', type=str, choices=['full', 'part'], default='full',
                         help='Indicates which models to choose for evaluations - the ones trained on the entire dataset'
                              ' (full), or the ones trained only on the training set (part).')
-
     args = parser.parse_args()
 
     # Call the main function with the parsed arguments
