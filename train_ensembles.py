@@ -52,20 +52,33 @@ class EnsembleTrainer:
         # Determine where to resume training (useful if the program was killed during the run)
         start_index = self.get_last_trained_model_index()
 
-        for i in tqdm(range(start_index, self.models_count)):
+        for i in tqdm(range(self.models_count)):
             model, optimizer = u.initialize_models(self.dataset_name, self.model_type)
-            # Train the model
-            u.train(self.dataset_name, model, train_loader, optimizer, epochs)
-            self.models.append(model)
-            # Save model state
-            if self.save:
-                torch.save(model.state_dict(), f"{u.MODEL_SAVE_DIR}{self.training}{self.dataset_name}"
-                                               f"_{self.models_count}_{self.model_type}ensemble_{i}.pth",
-                           _use_new_zipfile_serialization=False)  # Ensuring backward compatibility
-            # Evaluate on the training set
+
+            if i < start_index:
+                # Load the pretrained model if it exists
+                model_path = f"{u.MODEL_SAVE_DIR}{self.training}{self.dataset_name}" \
+                             f"_{self.models_count}_{self.model_type}ensemble_{i}.pth"
+                if os.path.exists(model_path):
+                    model.load_state_dict(torch.load(model_path))
+                else:
+                    print(f'Pretrained model {i} not found. Skipping.')
+                    continue
+            else:
+                # Train the model
+                u.train(self.dataset_name, model, train_loader, optimizer, epochs)
+                self.models.append(model)
+                # Save model state
+                if self.save:
+                    torch.save(model.state_dict(), f"{u.MODEL_SAVE_DIR}{self.training}{self.dataset_name}"
+                                                   f"_{self.models_count}_{self.model_type}ensemble_{i}.pth",
+                               _use_new_zipfile_serialization=False)  # Ensuring backward compatibility
+
+            # Evaluate the model on the test set
             accuracy = u.test(model, test_loader)
             class_accuracies[i] = u.class_level_test(model, test_loader, num_classes)
-            print(f'Model {i} finished training, achieving accuracy of {accuracy}% on the test set.')
+            print(f'Model {i} finished evaluation, achieving accuracy of {accuracy}% on the test set.')
+
         u.save_data(class_accuracies, class_accuracies_file)
 
         if self.training == 'full':
