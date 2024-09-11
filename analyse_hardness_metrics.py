@@ -606,9 +606,9 @@ def compute_iou(adaptive_indices, full_indices):
     return iou
 
 
-def main(dataset_name: str):
+def main(dataset_name: str, model_type: str):
     # Define file paths for saving and loading cached results
-    full_accuracies_file = f"{u.HARD_IMBALANCE_DIR}full{dataset_name}_avg_class_accuracies.pkl"
+    full_accuracies_file = f"{u.HARD_IMBALANCE_DIR}full{dataset_name}_avg_class_accuracies_on_{model_type}ensemble.pkl"
     full_proximity_file = f"{u.HARD_IMBALANCE_DIR}full{dataset_name}_proximity_indicators.pkl"
     part_proximity_file = f"{u.HARD_IMBALANCE_DIR}part{dataset_name}_proximity_indicators.pkl"
     metric_abbreviations = [
@@ -644,20 +644,20 @@ def main(dataset_name: str):
     for training in ['full', 'part']:
         distributions = [full_distributions, part_distributions][training == 'part']
         compare_metrics_to_class_accuracies(distributions[0], full_avg_class_accuracies, num_classes,
-                                            f'{training}{dataset_name}_adaptive_easyPCC.pdf',
-                                            f'{training}{dataset_name}_adaptive_easySRC.pdf')
+                                            f'{training}{model_type}{dataset_name}_adaptive_easyPCC.pdf',
+                                            f'{training}{model_type}{dataset_name}_adaptive_easySRC.pdf')
         compare_metrics_to_class_accuracies(distributions[1], full_avg_class_accuracies, num_classes,
-                                            f'{training}{dataset_name}_adaptive_hardPCC.pdf',
-                                            f'{training}{dataset_name}_adaptive_hardSRC.pdf')
+                                            f'{training}{model_type}{dataset_name}_adaptive_hardPCC.pdf',
+                                            f'{training}{model_type}{dataset_name}_adaptive_hardSRC.pdf')
         compare_metrics_to_class_accuracies(distributions[2], full_avg_class_accuracies, num_classes,
-                                            f'{training}{dataset_name}_fixed_easyPCC.pdf',
-                                            f'{training}{dataset_name}_fixed_easySRC.pdf')
+                                            f'{training}{model_type}{dataset_name}_fixed_easyPCC.pdf',
+                                            f'{training}{model_type}{dataset_name}_fixed_easySRC.pdf')
         compare_metrics_to_class_accuracies(distributions[3], full_avg_class_accuracies, num_classes,
-                                            f'{training}{dataset_name}_fixed_hardPCC.pdf',
-                                            f'{training}{dataset_name}_fixed_hardSRC.pdf')
+                                            f'{training}{model_type}{dataset_name}_fixed_hardPCC.pdf',
+                                            f'{training}{model_type}{dataset_name}_fixed_hardSRC.pdf')
         compare_metrics_to_class_accuracies(full_class_averages, full_avg_class_accuracies, num_classes,
-                                            f'{training}{dataset_name}_avgPCC.pdf',
-                                            f'{training}{dataset_name}_avgSRC.pdf')
+                                            f'{training}{model_type}{dataset_name}_avgPCC.pdf',
+                                            f'{training}{model_type}{dataset_name}_avgSRC.pdf')
 
     # Measure the ratio of easy:hard samples in the training and test splits proposed by PyTorch
     compute_easy_hard_ratios(dataset_name, full_indices[0], full_indices[1])
@@ -705,6 +705,8 @@ if __name__ == '__main__':
     )
     parser.add_argument('--dataset_name', type=str, default='MNIST',
                         help='Name of the dataset (MNIST, CIFAR10, CIFAR100).')
+    parser.add_argument('--model_type', type=str, choices=['simple', 'complex'],
+                        help='Specifies the type of network used for training (MLP vs LeNet or ResNet20 vs ResNet56).')
     args = parser.parse_args()
 
     main(**vars(args))
