@@ -9,7 +9,6 @@ from tqdm import tqdm
 
 import utils as u
 
-
 np.random.seed(42)
 torch.manual_seed(42)
 if torch.cuda.is_available():
@@ -25,6 +24,17 @@ class EnsembleTrainer:
         self.training = training
         self.model_type = model_type
 
+    def get_last_trained_model_index(self):
+        """Check the save directory to see how far training went last time."""
+        trained_models = [f for f in os.listdir(u.MODEL_SAVE_DIR) if
+                          f.startswith(
+                              f"{self.training}{self.dataset_name}_{self.models_count}_{self.model_type}ensemble_")]
+        if trained_models:
+            # Get the highest model index from the filenames
+            last_trained_index = max([int(f.split('_')[-1].split('.')[0]) for f in trained_models])
+            return last_trained_index + 1  # To start from the next model
+        return 0
+
     def train_ensemble(self, train_loader: DataLoader, test_loader: DataLoader):
         """Train an ensemble of models on the full dataset."""
         if self.training == 'full':
@@ -38,22 +48,25 @@ class EnsembleTrainer:
                                 f"_avg_class_accuracies_on_{self.model_type}ensemble.pkl"
         if os.path.exists(class_accuracies_file):
             class_accuracies = u.load_data(class_accuracies_file)
-        else:
-            for i in tqdm(range(self.models_count)):
-                model, optimizer = u.initialize_models(self.dataset_name, self.model_type)
-                # Train the model
-                u.train(self.dataset_name, model, train_loader, optimizer, epochs)
-                self.models.append(model)
-                # Save model state
-                if self.save:
-                    torch.save(model.state_dict(), f"{u.MODEL_SAVE_DIR}{self.training}{self.dataset_name}"
-                                                   f"_{self.models_count}_{self.model_type}ensemble_{i}.pth",
-                               _use_new_zipfile_serialization=False)  # Ensuring backward compatibility
-                # Evaluate on the training set
-                accuracy = u.test(model, test_loader)
-                class_accuracies[i] = u.class_level_test(model, test_loader, num_classes)
-                print(f'Model {i} finished training, achieving accuracy of {accuracy}% on the test set.')
-            u.save_data(class_accuracies, class_accuracies_file)
+
+        # Determine where to resume training (useful if the program was killed during the run)
+        start_index = self.get_last_trained_model_index()
+
+        for i in tqdm(range(start_index, self.models_count)):
+            model, optimizer = u.initialize_models(self.dataset_name, self.model_type)
+            # Train the model
+            u.train(self.dataset_name, model, train_loader, optimizer, epochs)
+            self.models.append(model)
+            # Save model state
+            if self.save:
+                torch.save(model.state_dict(), f"{u.MODEL_SAVE_DIR}{self.training}{self.dataset_name}"
+                                               f"_{self.models_count}_{self.model_type}ensemble_{i}.pth",
+                           _use_new_zipfile_serialization=False)  # Ensuring backward compatibility
+            # Evaluate on the training set
+            accuracy = u.test(model, test_loader)
+            class_accuracies[i] = u.class_level_test(model, test_loader, num_classes)
+            print(f'Model {i} finished training, achieving accuracy of {accuracy}% on the test set.')
+        u.save_data(class_accuracies, class_accuracies_file)
 
         if self.training == 'full':
             running_avg_class_accuracies = np.cumsum(class_accuracies, axis=0) / \
