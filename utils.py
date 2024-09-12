@@ -118,20 +118,24 @@ def load_full_data_and_normalize(dataset_name: str, to_grayscale: bool = False) 
     return TensorDataset(normalized_subset_data, full_targets)
 
 
-def load_data_and_normalize(dataset_name: str) -> Tuple[TensorDataset, TensorDataset]:
+def load_data_and_normalize(dataset_name: str, to_grayscale: bool = False) -> Tuple[TensorDataset, TensorDataset]:
     """
     Load and normalize the dataset. Optionally, modify the dataset to be long-tailed for the training set.
 
     :param dataset_name: name of the dataset to load. It has to be available in `torchvision.datasets`.
+    :param to_grayscale: if True and dataset_name is 'CIFAR10', it will transform images to grayscale
     :return: Two TensorDatasets - one for training data and another for test data.
     """
-    train_dataset = getattr(datasets, dataset_name)(root="./data", train=True, download=True,
-                                                    transform=transforms.ToTensor())
-    test_dataset = getattr(datasets, dataset_name)(root="./data", train=False, download=True,
-                                                   transform=transforms.ToTensor())
+    transform_list = [transforms.ToTensor(), transforms.Grayscale(num_output_channels=1)]
+    data_transform = transforms.Compose(transform_list)
+    train_dataset = getattr(datasets, dataset_name)(root="./data", train=True, download=True, transform=data_transform)
+    test_dataset = getattr(datasets, dataset_name)(root="./data", train=False, download=True, transform=data_transform)
     if dataset_name in ['CIFAR10', 'CIFAR100']:
         train_data = torch.tensor(train_dataset.data).permute(0, 3, 1, 2).float()
         test_data = torch.tensor(test_dataset.data).permute(0, 3, 1, 2).float()
+        if to_grayscale and dataset_name == 'CIFAR10':
+            train_data = train_data.mean(dim=1, keepdim=True)  # Convert to single channel
+            test_data = test_data.mean(dim=1, keepdim=True)    # Convert to single channel
     else:
         train_data = train_dataset.data.unsqueeze(1).float()
         test_data = test_dataset.data.unsqueeze(1).float()
