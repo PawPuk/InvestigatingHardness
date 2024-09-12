@@ -67,6 +67,7 @@ class Proximity:
         self.k = k
         self.centroids = self.compute_centroids()
         self.samples, self.labels = self.collect_samples()
+        # TODO: For CIFAR10 change to greyscale and see if it has positive effect on correlations
 
     def compute_centroids(self):
         """Compute the centroids for each class."""

@@ -90,7 +90,7 @@ def find_division_points_for_second_family(first_derivatives: np.ndarray, window
         window_mean = np.mean(first_derivatives[i:i + window_size])
         if abs(window_mean - right_most_value) > epsilon:
             return i + 500, i + 500  # Move the point slightly to the right
-    raise Exception
+    return 0, 0
 
 
 def find_division_points_for_third_family(second_derivatives: np.ndarray, window_size1: int = 20000,
@@ -103,7 +103,7 @@ def find_division_points_for_third_family(second_derivatives: np.ndarray, window
         window_mean = np.mean(second_derivatives[i:i + window_size2])
         if abs(window_mean - left_most_value) > epsilon:
             return i + 500, i + 500  # Move the point slightly to the right
-    raise Exception
+    return 0, 0
 
 
 def plot_metric_results(metric_idx: int, sorted_normalized_metric: np.ndarray, avg_gradients: List[np.ndarray],
@@ -669,7 +669,7 @@ def main(dataset_name: str, model_type: str):
     spearman_values_hard = []
     kendall_values_easy = []
     kendall_values_hard = []
-
+    # TODO: Modify the below to work with fixes, and change the threshold for fixed to 10%
     for metric_idx, (adaptive_easy, adaptive_hard) in enumerate(zip(part_indices[0], part_indices[1])):
         # Compute IoU
         easy_iou = compute_iou(adaptive_easy, full_indices[0][metric_idx])
