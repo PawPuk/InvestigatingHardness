@@ -23,7 +23,7 @@ def main(dataset_name: str, training: str, k2: int):
     if training == 'full':
         training_dataset = u.load_full_data_and_normalize(dataset_name, to_grayscale=True)
     else:
-        training_dataset, _ = u.load_data_and_normalize(dataset_name)
+        training_dataset, _ = u.load_data_and_normalize(dataset_name, to_grayscale=True)
 
     loader = DataLoader(training_dataset, batch_size=len(training_dataset), shuffle=False)
 

@@ -194,7 +194,7 @@ def plot_metric_results(metric_idx: int, sorted_normalized_metric: np.ndarray, a
 
 
 def extract_extreme_samples_threshold(metrics: List[List[float]], labels: List[int], dataset_name: str, model_type: str,
-                                      invert: List[bool], training: str, hard_threshold_percent: float = 0.05):
+                                      invert: List[bool], training: str, hard_threshold_percent: float = 0.15):
     """Extract easy and hard samples using both adaptive and hard thresholds, returning their indices and
     distributions."""
     num_metrics = len(metrics)
@@ -661,7 +661,7 @@ def main(dataset_name: str, model_type: str):
                                             f'{training}{model_type}{dataset_name}_avgSRC.pdf')
 
     # Measure the ratio of easy:hard samples in the training and test splits proposed by PyTorch
-    compute_easy_hard_ratios(dataset_name, full_indices[0], full_indices[1])
+    compute_easy_hard_ratios(dataset_name, full_indices[2], full_indices[3])
 
     iou_values_easy = []
     iou_values_hard = []
@@ -670,32 +670,32 @@ def main(dataset_name: str, model_type: str):
     kendall_values_easy = []
     kendall_values_hard = []
     # TODO: Modify the below to work with fixes, and change the threshold for fixed to 10%
-    for metric_idx, (adaptive_easy, adaptive_hard) in enumerate(zip(part_indices[0], part_indices[1])):
+    for metric_idx, (adaptive_easy, adaptive_hard) in enumerate(zip(part_indices[2], part_indices[3])):
         # Compute IoU
-        easy_iou = compute_iou(adaptive_easy, full_indices[0][metric_idx])
-        hard_iou = compute_iou(adaptive_hard, full_indices[1][metric_idx])
+        easy_iou = compute_iou(adaptive_easy, full_indices[2][metric_idx])
+        hard_iou = compute_iou(adaptive_hard, full_indices[3][metric_idx])
         iou_values_easy.append(easy_iou)
         iou_values_hard.append(hard_iou)
 
         # Adjust the easy and hard indices obtained via full and part setting to have the same length
-        if len(adaptive_easy) > len(full_indices[0][metric_idx]):
-            adaptive_easy = adaptive_easy[:len(full_indices[0][metric_idx])]
+        if len(adaptive_easy) > len(full_indices[2][metric_idx]):
+            adaptive_easy = adaptive_easy[:len(full_indices[2][metric_idx])]
         else:
-            full_indices[0][metric_idx] = full_indices[0][metric_idx][:len(adaptive_easy)]
-        if len(adaptive_hard) > len(full_indices[1][metric_idx]):
-            adaptive_hard = adaptive_hard[-len(full_indices[1][metric_idx]):]
+            full_indices[2][metric_idx] = full_indices[2][metric_idx][:len(adaptive_easy)]
+        if len(adaptive_hard) > len(full_indices[3][metric_idx]):
+            adaptive_hard = adaptive_hard[-len(full_indices[3][metric_idx]):]
         else:
-            full_indices[1][metric_idx] = full_indices[1][metric_idx][-len(adaptive_hard):]
+            full_indices[3][metric_idx] = full_indices[3][metric_idx][-len(adaptive_hard):]
 
         # Compute Spearman's
-        easy_spearman, _ = spearmanr(adaptive_easy, full_indices[0][metric_idx])
-        hard_spearman, _ = spearmanr(adaptive_hard, full_indices[1][metric_idx])
+        easy_spearman, _ = spearmanr(adaptive_easy, full_indices[2][metric_idx])
+        hard_spearman, _ = spearmanr(adaptive_hard, full_indices[3][metric_idx])
         spearman_values_easy.append(easy_spearman)
         spearman_values_hard.append(hard_spearman)
 
         # Compute Kendall's Tau
-        easy_kendall, _ = kendalltau(adaptive_easy, full_indices[0][metric_idx])
-        hard_kendall, _ = kendalltau(adaptive_hard, full_indices[1][metric_idx])
+        easy_kendall, _ = kendalltau(adaptive_easy, full_indices[2][metric_idx])
+        hard_kendall, _ = kendalltau(adaptive_hard, full_indices[3][metric_idx])
         kendall_values_easy.append(easy_kendall)
         kendall_values_hard.append(hard_kendall)
         # TODO: add p-values and incorporate them into the plot

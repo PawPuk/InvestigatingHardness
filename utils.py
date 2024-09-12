@@ -85,17 +85,11 @@ def load_full_data_and_normalize(dataset_name: str, to_grayscale: bool = False) 
     :return: random, normalized subset of dataset_name of size subset_size with (noise_rate*subset_size) labels changed
     to introduce label noise
     """
-    # Define the base transformation (converting to tensor)
-    transform_list = [transforms.ToTensor()]
-    # Add grayscale conversion if the flag is set and the dataset is CIFAR10
-    if dataset_name == 'CIFAR10' and to_grayscale:
-        print('Converting to greyscale')
-        transform_list.append(transforms.Grayscale(num_output_channels=1))  # Convert to grayscale
-    # Compose the transformations
-    data_transform = transforms.Compose(transform_list)
     # Load the train and test datasets based on the 'dataset_name' parameter
-    train_dataset = getattr(datasets, dataset_name)(root="./data", train=True, download=True, transform=data_transform)
-    test_dataset = getattr(datasets, dataset_name)(root="./data", train=False, download=True, transform=data_transform)
+    train_dataset = getattr(datasets, dataset_name)(root="./data", train=True, download=True,
+                                                    transform=transforms.ToTensor())
+    test_dataset = getattr(datasets, dataset_name)(root="./data", train=False, download=True,
+                                                   transform=transforms.ToTensor())
     # Convert dataset into tensor format and handle data shape according to the dataset
     if dataset_name in ['CIFAR10', 'CIFAR100']:
         train_data = torch.tensor(train_dataset.data).permute(0, 3, 1, 2).float()  # (N, H, W, C) -> (N, C, H, W)
@@ -126,10 +120,10 @@ def load_data_and_normalize(dataset_name: str, to_grayscale: bool = False) -> Tu
     :param to_grayscale: if True and dataset_name is 'CIFAR10', it will transform images to grayscale
     :return: Two TensorDatasets - one for training data and another for test data.
     """
-    transform_list = [transforms.ToTensor(), transforms.Grayscale(num_output_channels=1)]
-    data_transform = transforms.Compose(transform_list)
-    train_dataset = getattr(datasets, dataset_name)(root="./data", train=True, download=True, transform=data_transform)
-    test_dataset = getattr(datasets, dataset_name)(root="./data", train=False, download=True, transform=data_transform)
+    train_dataset = getattr(datasets, dataset_name)(root="./data", train=True, download=True,
+                                                    transform=transforms.ToTensor())
+    test_dataset = getattr(datasets, dataset_name)(root="./data", train=False, download=True,
+                                                   transform=transforms.ToTensor())
     if dataset_name in ['CIFAR10', 'CIFAR100']:
         train_data = torch.tensor(train_dataset.data).permute(0, 3, 1, 2).float()
         test_data = torch.tensor(test_dataset.data).permute(0, 3, 1, 2).float()
