@@ -339,7 +339,8 @@ def compare_metrics_to_class_accuracies(class_distributions, avg_class_accuracie
 
     metric_abbreviations = [
         'SameCentroidDist', 'OtherCentroidDist', 'CentroidDistRatio', 'Same1NNDist', 'Other1NNDist', '1NNRatioDist',
-        'AvgSame40NNDist', 'AvgOther40NNDist', 'AvgAll40NNDist', 'Avg40NNDistRatio', '40NNPercSame', '40NNPercOther'
+        'AvgSame40NNDist', 'AvgOther40NNDist', 'AvgAll40NNDist', 'Avg40NNDistRatio', '40NNPercSame', '40NNPercOther',
+        'GausCurv', 'MeanCurv'
     ]  # Abbreviations for each metric to keep plot readable.
 
     # Compute both PCC and Spearman for each metric
@@ -610,9 +611,12 @@ def main(dataset_name: str, model_type: str):
     full_accuracies_file = f"{u.HARD_IMBALANCE_DIR}full{dataset_name}_avg_class_accuracies_on_{model_type}ensemble.pkl"
     full_proximity_file = f"{u.HARD_IMBALANCE_DIR}full{dataset_name}_proximity_indicators.pkl"
     part_proximity_file = f"{u.HARD_IMBALANCE_DIR}part{dataset_name}_proximity_indicators.pkl"
+    full_curvature_file = f"{u.HARD_IMBALANCE_DIR}full{dataset_name}_curvature_indicators.pkl"
+    part_curvature_file = f"{u.HARD_IMBALANCE_DIR}part{dataset_name}_curvature_indicators.pkl"
     metric_abbreviations = [
         'SameCentroidDist', 'OtherCentroidDist', 'CentroidDistRatio', 'Same1NNDist', 'Other1NNDist', '1NNRatioDist',
-        'AvgSame40NNDist', 'AvgOther40NNDist', 'AvgAll40NNDist', 'Avg40NNDistRatio', '40NNPercSame', '40NNPercOther'
+        'AvgSame40NNDist', 'AvgOther40NNDist', 'AvgAll40NNDist', 'Avg40NNDistRatio', '40NNPercSame', '40NNPercOther',
+        'GausCurv', 'MeanCurv'
     ]
 
     # Load the dataset and metrics
@@ -622,18 +626,22 @@ def main(dataset_name: str, model_type: str):
     full_avg_class_accuracies = np.sum(full_avg_class_accuracies, axis=0) / len(full_avg_class_accuracies)
     full_proximity_metrics = u.load_data(full_proximity_file)
     part_proximity_metrics = u.load_data(part_proximity_file)
+    full_curvature_metrics = u.load_data(full_curvature_file)
+    part_curvature_metrics = u.load_data(part_curvature_file)
 
+    full_hardness_metrics = full_proximity_metrics + full_curvature_metrics
+    part_hardness_metrics = part_proximity_metrics + part_curvature_metrics
     full_training_labels = full_training_dataset.tensors[1].numpy()
     part_training_labels = part_training_dataset.tensors[1].numpy()
     num_classes = len(np.unique(full_training_labels))
-    full_class_averages = compute_class_averages_of_metrics(full_proximity_metrics, full_training_labels)
-    invert_metrics = [False, True, False, False, True, False, False, True, False, False, True, False]
+    full_class_averages = compute_class_averages_of_metrics(full_hardness_metrics, full_training_labels)
+    invert_metrics = [False, True, False, False, True, False, False, True, False, False, True, False, False, False]
 
     # Extract the hardest samples for each metric and compute their class distributions
-    full_indices, full_distributions = extract_extreme_samples_threshold(full_proximity_metrics, full_training_labels,
+    full_indices, full_distributions = extract_extreme_samples_threshold(full_hardness_metrics, full_training_labels,
                                                                          dataset_name, model_type, invert_metrics,
                                                                          'full')
-    part_indices, part_distributions = extract_extreme_samples_threshold(part_proximity_metrics, part_training_labels,
+    part_indices, part_distributions = extract_extreme_samples_threshold(part_hardness_metrics, part_training_labels,
                                                                          dataset_name, model_type, invert_metrics,
                                                                          'part')
 
