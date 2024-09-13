@@ -359,7 +359,9 @@ def compare_metrics_to_class_accuracies(class_distributions, avg_class_accuracie
 
     print()
     print('-' * 20)
+    print("PCC correlations:", correlations_pcc)
     print("PCC p-values:", p_values_pcc)
+    print("Spearman correlations:", correlation_spearman)
     print("Spearman p-values:", p_values_spearman)
     print('-' * 20)
     print()

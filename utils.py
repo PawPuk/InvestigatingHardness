@@ -3,6 +3,7 @@ import pickle
 from typing import List, Tuple, Union
 
 import numpy as np
+from sklearn.decomposition import PCA
 import torch
 from torch.optim import Adam, SGD
 from torch.optim.lr_scheduler import CosineAnnealingLR
@@ -76,21 +77,44 @@ def calculate_mean_std(accuracies: List[float]) -> Tuple[float, float]:
     return np.mean(accuracies), np.std(accuracies)
 
 
-def load_full_data_and_normalize(dataset_name: str, to_grayscale: bool = False) -> TensorDataset:
-    """ Used to load the data from common datasets available in torchvision, and normalize them.
-    The normalization is based on the mean and std of a random subset of the dataset of the size subset_size.
-
-    :param dataset_name: name of the dataset to load. It has to be available in `torchvision.datasets`
-    :param to_grayscale: if True and dataset_name is 'CIFAR10', it will transform images to grayscale
-    :return: random, normalized subset of dataset_name of size subset_size with (noise_rate*subset_size) labels changed
-    to introduce label noise
+def reduce_dimensionality(dataset_name: str, data: torch.Tensor, apply_pca: bool = False) -> torch.Tensor:
     """
-    # Load the train and test datasets based on the 'dataset_name' parameter
-    train_dataset = getattr(datasets, dataset_name)(root="./data", train=True, download=True,
-                                                    transform=transforms.ToTensor())
-    test_dataset = getattr(datasets, dataset_name)(root="./data", train=False, download=True,
-                                                   transform=transforms.ToTensor())
-    # Convert dataset into tensor format and handle data shape according to the dataset
+    Optionally reduces the dimensionality of the data to match that of MNIST (784) if the dataset is CIFAR10 or CIFAR100.
+    For other datasets like MNIST, it simply returns the data as is.
+
+    :param dataset_name: Name of the dataset.
+    :param data: Data tensor of shape (N, C, H, W).
+    :param apply_pca: Whether to apply PCA for dimensionality reduction.
+    :return: Data tensor with reduced dimensionality or original data.
+    """
+    if apply_pca and dataset_name in ['CIFAR10', 'CIFAR100']:
+        N = data.shape[0]
+        # Flatten the data: (N, C, H, W) -> (N, C*H*W)
+        data_flat = data.view(N, -1)
+        # Perform PCA to reduce dimensions to 784
+        pca = PCA(n_components=784)
+        data_reduced = pca.fit_transform(data_flat.numpy())
+        # Convert back to tensor
+        data_reduced = torch.from_numpy(data_reduced).float()
+        return data_reduced  # Shape: (N, 784)
+    else:
+        return data  # Return data as is
+
+
+def load_full_data_and_normalize(dataset_name: str, to_grayscale: bool = False,
+                                 apply_pca: bool = False) -> TensorDataset:
+    """Loads and normalizes the full dataset (train + test). Optionally reduces dimensionality.
+
+    :param dataset_name: Name of the dataset to load.
+    :param to_grayscale: If True and dataset_name is 'CIFAR10', transforms images to grayscale.
+    :param apply_pca: Whether to apply PCA for dimensionality reduction.
+    :return: A TensorDataset containing the normalized data and targets.
+    """
+    # Load the train and test datasets
+    train_dataset = getattr(datasets, dataset_name)(root="./data", train=True, download=True)
+    test_dataset = getattr(datasets, dataset_name)(root="./data", train=False, download=True)
+
+    # Convert datasets into tensors
     if dataset_name in ['CIFAR10', 'CIFAR100']:
         train_data = torch.tensor(train_dataset.data).permute(0, 3, 1, 2).float()  # (N, H, W, C) -> (N, C, H, W)
         test_data = torch.tensor(test_dataset.data).permute(0, 3, 1, 2).float()
@@ -98,51 +122,80 @@ def load_full_data_and_normalize(dataset_name: str, to_grayscale: bool = False) 
             train_data = train_data.mean(dim=1, keepdim=True)  # Convert to single channel
             test_data = test_data.mean(dim=1, keepdim=True)    # Convert to single channel
     else:
-        train_data = train_dataset.data.unsqueeze(1).float()  # Add channel dimension for MNIST/other datasets
-        test_data = test_dataset.data.unsqueeze(1).float()
-    # Concatenate train and test datasets
-    full_data = torch.cat([train_data, test_data])
-    full_targets = torch.cat([torch.tensor(train_dataset.targets), torch.tensor(test_dataset.targets)])
+        train_data = torch.tensor(train_dataset.data).unsqueeze(1).float()
+        test_data = torch.tensor(test_dataset.data).unsqueeze(1).float()
+
+    # Concatenate train and test data
+    full_data = torch.cat([train_data, test_data], dim=0)
+    full_targets = torch.cat([torch.tensor(train_dataset.targets), torch.tensor(test_dataset.targets)], dim=0)
+
+    # Reduce dimensionality if necessary
+    full_data = reduce_dimensionality(dataset_name, full_data, apply_pca=apply_pca)
+
     # Normalize the data
-    data_means = torch.mean(full_data, dim=(0, 2, 3)) / 255.0
-    data_vars = torch.sqrt(torch.var(full_data, dim=(0, 2, 3)) / 255.0 ** 2 + EPSILON)
-    # Apply the calculated normalization to the dataset
-    normalize_transform = transforms.Normalize(mean=data_means, std=data_vars)
-    normalized_subset_data = normalize_transform(full_data / 255.0)  # TODO: see the impact of removing normalization
-    return TensorDataset(normalized_subset_data, full_targets)
+    if apply_pca and dataset_name in ['CIFAR10', 'CIFAR100']:
+        # Data is flattened to (N, 784) after PCA
+        mean = torch.mean(full_data, dim=0)
+        std = torch.std(full_data, dim=0) + EPSILON
+        normalized_full_data = (full_data - mean) / std
+    else:
+        # Data is in (N, C, H, W)
+        data_means = torch.mean(full_data, dim=(0, 2, 3)) / 255.0
+        data_stds = torch.sqrt(torch.var(full_data, dim=(0, 2, 3)) / 255.0 ** 2 + EPSILON)
+        # Apply normalization
+        normalize_transform = transforms.Normalize(mean=data_means, std=data_stds)
+        normalized_full_data = normalize_transform(full_data / 255.0)
+
+    return TensorDataset(normalized_full_data, full_targets)
 
 
-def load_data_and_normalize(dataset_name: str, to_grayscale: bool = False) -> Tuple[TensorDataset, TensorDataset]:
+def load_data_and_normalize(dataset_name: str, to_grayscale: bool = False,
+                            apply_pca: bool = False) -> Tuple[TensorDataset, TensorDataset]:
     """
-    Load and normalize the dataset. Optionally, modify the dataset to be long-tailed for the training set.
+    Loads and normalizes the dataset. Optionally reduces dimensionality.
 
-    :param dataset_name: name of the dataset to load. It has to be available in `torchvision.datasets`.
-    :param to_grayscale: if True and dataset_name is 'CIFAR10', it will transform images to grayscale
+    :param dataset_name: Name of the dataset to load.
+    :param to_grayscale: If True and dataset_name is 'CIFAR10', it will transform images to grayscale.
+    :param apply_pca: Whether to apply PCA for dimensionality reduction.
     :return: Two TensorDatasets - one for training data and another for test data.
     """
-    train_dataset = getattr(datasets, dataset_name)(root="./data", train=True, download=True,
-                                                    transform=transforms.ToTensor())
-    test_dataset = getattr(datasets, dataset_name)(root="./data", train=False, download=True,
-                                                   transform=transforms.ToTensor())
+    # Load the train and test datasets
+    train_dataset = getattr(datasets, dataset_name)(root="./data", train=True, download=True)
+    test_dataset = getattr(datasets, dataset_name)(root="./data", train=False, download=True)
+
+    # Convert datasets into tensors
     if dataset_name in ['CIFAR10', 'CIFAR100']:
         train_data = torch.tensor(train_dataset.data).permute(0, 3, 1, 2).float()
         test_data = torch.tensor(test_dataset.data).permute(0, 3, 1, 2).float()
-        if to_grayscale and dataset_name == 'CIFAR10':
+        if to_grayscale:
             train_data = train_data.mean(dim=1, keepdim=True)  # Convert to single channel
             test_data = test_data.mean(dim=1, keepdim=True)    # Convert to single channel
     else:
-        train_data = train_dataset.data.unsqueeze(1).float()
-        test_data = test_dataset.data.unsqueeze(1).float()
+        train_data = torch.tensor(train_dataset.data).unsqueeze(1).float()
+        test_data = torch.tensor(test_dataset.data).unsqueeze(1).float()
 
     train_targets = torch.tensor(train_dataset.targets)
     test_targets = torch.tensor(test_dataset.targets)
 
-    data_means = torch.mean(train_data, dim=(0, 2, 3)) / 255.0
-    data_vars = torch.sqrt(torch.var(train_data, dim=(0, 2, 3)) / 255.0 ** 2 + EPSILON)
+    # Reduce dimensionality if necessary
+    train_data = reduce_dimensionality(dataset_name, train_data, apply_pca=apply_pca)
+    test_data = reduce_dimensionality(dataset_name, test_data, apply_pca=apply_pca)
 
-    normalize_transform = transforms.Normalize(mean=data_means, std=data_vars)
-    normalized_train_data = normalize_transform(train_data / 255.0)
-    normalized_test_data = normalize_transform(test_data / 255.0)
+    # Normalize the data
+    if apply_pca and dataset_name in ['CIFAR10', 'CIFAR100']:
+        # Data is flattened to (N, 784) after PCA
+        mean = torch.mean(train_data, dim=0)
+        std = torch.std(train_data, dim=0) + EPSILON
+        normalized_train_data = (train_data - mean) / std
+        normalized_test_data = (test_data - mean) / std  # Use the same mean and std as training data
+    else:
+        # Data is in (N, C, H, W)
+        data_means = torch.mean(train_data, dim=(0, 2, 3)) / 255.0
+        data_stds = torch.sqrt(torch.var(train_data, dim=(0, 2, 3)) / 255.0 ** 2 + EPSILON)
+        # Apply normalization
+        normalize_transform = transforms.Normalize(mean=data_means, std=data_stds)
+        normalized_train_data = normalize_transform(train_data / 255.0)
+        normalized_test_data = normalize_transform(test_data / 255.0)
 
     return TensorDataset(normalized_train_data, train_targets), TensorDataset(normalized_test_data, test_targets)
 

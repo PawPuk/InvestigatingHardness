@@ -85,10 +85,10 @@ class EnsembleTrainer:
                                 f"_avg_class_accuracies_on_{self.model_type}ensemble.pkl"
         u.save_data(class_accuracies, class_accuracies_file)
 
-        if self.training == 'full':
-            running_avg_class_accuracies = np.array([class_accuracies[:i+1].mean(axis=0) for i in range(total_models)])
-            running_std_class_accuracies = np.array([class_accuracies[:i+1].std(axis=0) for i in range(total_models)])
-            self.plot_class_accuracies(running_avg_class_accuracies, running_std_class_accuracies, num_classes)
+        # Measure the consistency of class bias
+        running_avg_class_accuracies = np.array([class_accuracies[:i+1].mean(axis=0) for i in range(total_models)])
+        running_std_class_accuracies = np.array([class_accuracies[:i+1].std(axis=0) for i in range(total_models)])
+        self.plot_class_accuracies(running_avg_class_accuracies, running_std_class_accuracies, num_classes)
 
     def plot_class_accuracies(self, running_avg_class_accuracies, running_std_class_accuracies, num_classes):
         """Plot how the average accuracy of each class changes as we increase the number of models."""

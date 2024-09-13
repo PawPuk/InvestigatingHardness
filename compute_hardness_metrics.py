@@ -21,9 +21,9 @@ def main(dataset_name: str, training: str, k2: int):
     curvature_file = f"{u.HARD_IMBALANCE_DIR}{training}{dataset_name}_curvature_indicators.pkl"
     # Load the dataset
     if training == 'full':
-        training_dataset = u.load_full_data_and_normalize(dataset_name, to_grayscale=True)
+        training_dataset = u.load_full_data_and_normalize(dataset_name, to_grayscale=True, apply_pca=True)
     else:
-        training_dataset, _ = u.load_data_and_normalize(dataset_name, to_grayscale=True)
+        training_dataset, _ = u.load_data_and_normalize(dataset_name, to_grayscale=True, apply_pca=True)
 
     loader = DataLoader(training_dataset, batch_size=len(training_dataset), shuffle=False)
 
