@@ -340,7 +340,7 @@ def compare_metrics_to_class_accuracies(class_distributions, avg_class_accuracie
     metric_abbreviations = [
         'SameCentroidDist', 'OtherCentroidDist', 'CentroidDistRatio', 'Same1NNDist', 'Other1NNDist', '1NNRatioDist',
         'AvgSame40NNDist', 'AvgOther40NNDist', 'AvgAll40NNDist', 'Avg40NNDistRatio', '40NNPercSame', '40NNPercOther',
-        'GausCurv', 'MeanCurv'
+        'N1', 'N3', 'GausCurv', 'MeanCurv'
     ]  # Abbreviations for each metric to keep plot readable.
 
     # Compute both PCC and Spearman for each metric
@@ -361,7 +361,7 @@ def compare_metrics_to_class_accuracies(class_distributions, avg_class_accuracie
     print('-' * 20)
     print("PCC correlations:", correlations_pcc)
     print("PCC p-values:", p_values_pcc)
-    print("Spearman correlations:", correlation_spearman)
+    print("Spearman correlations:", correlations_spearman)
     print("Spearman p-values:", p_values_spearman)
     print('-' * 20)
     print()
@@ -618,7 +618,7 @@ def main(dataset_name: str, model_type: str):
     metric_abbreviations = [
         'SameCentroidDist', 'OtherCentroidDist', 'CentroidDistRatio', 'Same1NNDist', 'Other1NNDist', '1NNRatioDist',
         'AvgSame40NNDist', 'AvgOther40NNDist', 'AvgAll40NNDist', 'Avg40NNDistRatio', '40NNPercSame', '40NNPercOther',
-        'GausCurv', 'MeanCurv'
+        'N1', 'N3', 'GausCurv', 'MeanCurv'
     ]
 
     # Load the dataset and metrics
@@ -637,7 +637,8 @@ def main(dataset_name: str, model_type: str):
     part_training_labels = part_training_dataset.tensors[1].numpy()
     num_classes = len(np.unique(full_training_labels))
     full_class_averages = compute_class_averages_of_metrics(full_hardness_metrics, full_training_labels)
-    invert_metrics = [False, True, False, False, True, False, False, True, False, False, True, False, False, False]
+    invert_metrics = [False, True, False, False, True, False, False, True, False, False, True, False, False, False,
+                      False, False]
 
     # Extract the hardest samples for each metric and compute their class distributions
     full_indices, full_distributions = extract_extreme_samples_threshold(full_hardness_metrics, full_training_labels,

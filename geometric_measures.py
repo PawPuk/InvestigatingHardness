@@ -4,6 +4,9 @@ from typing import List
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
+from scipy.spatial.distance import cdist, pdist, squareform
+from scipy.sparse.csgraph import minimum_spanning_tree
+from scipy.sparse import csr_matrix
 from sklearn.cluster import DBSCAN
 from sklearn.mixture import GaussianMixture
 from sklearn.neighbors import NearestNeighbors
@@ -62,51 +65,63 @@ class Curvature:
 
 class Proximity:
     def __init__(self, loader: DataLoader, k: int):
-        """Initialize with the data loader, curvatures, and set K for KNN."""
+        """Initialize with the data loader and set K for KNN."""
         self.loader = loader
         self.k = k
-        self.centroids = self.compute_centroids()
         self.samples, self.labels = self.collect_samples()
-        # TODO: For CIFAR10 change to greyscale and see if it has positive effect on correlations
+        self.centroids = self.compute_centroids()
 
     def compute_centroids(self):
-        """Compute the centroids for each class."""
-        centroids, class_counts = {}, {}
+        """Compute the centroids for each class using vectorized operations."""
+        # Flatten samples
+        samples_flat = self.samples.view(self.samples.size(0), -1)
+        labels = self.labels
 
-        for data, targets in self.loader:
-            data, targets = data.to(u.DEVICE), targets.to(u.DEVICE)
-            unique_classes = torch.unique(targets)
+        # Get unique classes
+        classes = torch.unique(labels)
 
-            for cls in unique_classes:
-                class_mask = (targets == cls)
-                class_data = data[class_mask]
+        # Initialize centroids dictionary
+        centroids = {}
 
-                if cls.item() not in centroids:
-                    centroids[cls.item()] = torch.zeros_like(class_data[0])
-                    class_counts[cls.item()] = 0
-
-                centroids[cls.item()] += class_data.sum(dim=0)
-                class_counts[cls.item()] += class_data.size(0)
-
-        # Finalize the centroids by dividing by the number of samples per class
-        for cls in centroids:
-            centroids[cls] /= class_counts[cls]
+        # Compute centroids vectorized
+        for cls in classes:
+            class_mask = (labels == cls)
+            class_samples = samples_flat[class_mask]
+            centroids[cls.item()] = class_samples.mean(dim=0)
 
         return centroids
 
     def collect_samples(self):
         """Collect all samples and their corresponding labels from the loader."""
-        samples = []
-        labels = []
+        samples_list, labels_list = [], []
         for data, targets in self.loader:
-            samples.append(data.to(u.DEVICE))
-            labels.append(targets.to(u.DEVICE))
-        samples = torch.cat(samples)
-        labels = torch.cat(labels)
+            samples_list.append(data)
+            labels_list.append(targets)
+        samples = torch.cat(samples_list).to(u.DEVICE)
+        labels = torch.cat(labels_list).to(u.DEVICE)
         return samples, labels
 
     def compute_proximity_metrics(self):
         """Compute proximity metrics for each sample in the dataset, including KNN curvature."""
+        num_samples = self.samples.size(0)
+
+        # Flatten samples
+        samples_flat = self.samples.view(num_samples, -1).cpu().numpy()
+        labels_np = self.labels.cpu().numpy()
+
+        # Compute distance matrix
+        distance_matrix = squareform(pdist(samples_flat, metric='euclidean'))
+
+        # Prepare centroids
+        classes = sorted(self.centroids.keys())
+        centroids_list = [self.centroids[cls] for cls in classes]
+        centroids_tensor = torch.stack(centroids_list).cpu()  # Shape: (n_classes, feature_dim)
+
+        # Compute distances from all samples to all centroids
+        centroids_flat = centroids_tensor.numpy()  # Shape: (n_classes, feature_dim)
+        sample_to_centroid_dists = cdist(samples_flat, centroids_flat, metric='euclidean')  # (n_samples, n_classes)
+
+        # Prepare lists for metrics
         same_centroid_dists = []
         other_centroid_dists = []
         centroid_ratios = []
@@ -123,71 +138,119 @@ class Proximity:
         percentage_same_class_knn = []
         percentage_other_class_knn = []
 
-        # Prepare KNN classifier
-        flattened_samples = self.samples.view(self.samples.size(0), -1).cpu().numpy()
-        knn = NearestNeighbors(n_neighbors=self.k)
-        knn.fit(flattened_samples)
+        n3_different_class = []
 
-        for idx, (sample, target) in tqdm(enumerate(zip(self.samples, self.labels)),
-                                          desc='Computing sample-level proximity metrics.'):
-            # Flatten the sample for KNN
-            sample_np = sample.view(-1).cpu().numpy()
-            same_class_centroid = self.centroids[target.item()]
-            min_other_class_dist = float('inf')
+        # Build MST
+        mst_sparse = minimum_spanning_tree(csr_matrix(distance_matrix))
+        mst_sparse_undirected = mst_sparse + mst_sparse.T  # Make the MST undirected
 
-            # Compute distance to the same/other (closest) class centroid + ratio
-            same_centroid_dist = torch.norm(sample - same_class_centroid).item()
-            for cls, centroid in self.centroids.items():
-                if cls != target.item():
-                    dist = torch.norm(sample - centroid).item()
-                    if dist < min_other_class_dist:
-                        min_other_class_dist = dist
-            centroid_ratio = same_centroid_dist / min_other_class_dist
-            centroid_ratios.append(centroid_ratio)
-            other_centroid_dists.append(min_other_class_dist)
-            same_centroid_dists.append(same_centroid_dist)
+        # Extract the edges from the MST
+        mst_coo = mst_sparse_undirected.tocoo()
+        edges = list(zip(mst_coo.row, mst_coo.col))
 
-            # Compute the KNN for this sample
-            distances, indices = knn.kneighbors(sample_np.reshape(1, -1))
-            distances = distances.flatten()
-            indices = indices.flatten()
+        # Build a neighbor map from the MST
+        mst_neighbors = {}
+        for i, j in edges:
+            mst_neighbors.setdefault(i, set()).add(j)
+            mst_neighbors.setdefault(j, set()).add(i)
 
-            # Exclude the sample itself (index 0) from the KNN distances
-            knn_distances = distances[1:]
-            knn_labels = self.labels[indices[1:]].cpu().numpy()
-            knn_same_class_indices = knn_labels == target.item()
-            knn_other_class_indices = knn_labels != target.item()
+        # Initialize list for adapted N1
+        n1_different_class = []
+        batch_size = 1000
+        # For each sample, compute metrics
+        for start_idx in tqdm(range(0, num_samples, batch_size), desc='Computing sample-level proximity metrics.'):
+            end_idx = min(start_idx + batch_size, num_samples)
+            batch_indices = np.arange(start_idx, end_idx)
+            batch_targets = labels_np[batch_indices]
 
-            # Closest distances to the same and other class samples + ratio
-            if np.any(knn_same_class_indices):
-                min_same_class_dist = np.min(knn_distances[knn_same_class_indices])
-            else:
-                min_same_class_dist = np.inf
+            # Centroid distances for the batch
+            batch_centroid_dists = sample_to_centroid_dists[batch_indices]  # Shape: (batch_size, n_classes)
 
-            if np.any(knn_other_class_indices):
-                min_other_class_dist = np.min(knn_distances[knn_other_class_indices])
-            else:
-                min_other_class_dist = np.inf
+            # Get same and other centroid distances
+            target_class_indices = [classes.index(t) for t in batch_targets]
+            same_centroid_dists_batch = batch_centroid_dists[np.arange(len(batch_indices)), target_class_indices]
+            other_centroid_dists_batch = batch_centroid_dists.copy()
+            other_centroid_dists_batch[np.arange(len(batch_indices)), target_class_indices] = np.inf
+            min_other_centroid_dists_batch = np.min(other_centroid_dists_batch, axis=1)
 
-            closest_same_class_distances.append(min_same_class_dist)
-            closest_other_class_distances.append(min_other_class_dist)
-            closest_distance_ratios.append(min_same_class_dist / min_other_class_dist)
+            centroid_ratios_batch = same_centroid_dists_batch / min_other_centroid_dists_batch
 
-            # Average distances to same, other, and all samples in kNN
-            avg_same_dist = np.mean(knn_distances[knn_same_class_indices]) if np.any(
-                knn_same_class_indices) else np.inf
-            avg_other_dist = np.mean(knn_distances[knn_other_class_indices]) if np.any(
-                knn_other_class_indices) else np.inf
-            avg_all_dist = np.mean(knn_distances)
+            same_centroid_dists.extend(same_centroid_dists_batch.tolist())
+            other_centroid_dists.extend(min_other_centroid_dists_batch.tolist())
+            centroid_ratios.extend(centroid_ratios_batch.tolist())
 
-            avg_same_class_distances.append(avg_same_dist)
-            avg_other_class_distances.append(avg_other_dist)
-            avg_all_class_distances.append(avg_all_dist)
-            avg_distance_ratios.append(avg_same_dist / avg_other_dist)
+            # KNN computations for the batch
+            batch_distances = distance_matrix[batch_indices]  # Shape: (batch_size, num_samples)
+            # Set self-distances to np.inf
+            batch_distances[np.arange(len(batch_indices)), batch_indices] = np.inf
 
-            # Compute the percentage of kNN samples from same and other classes
-            percentage_same_class_knn.append(np.sum(knn_same_class_indices) / self.k)
-            percentage_other_class_knn.append(np.sum(knn_other_class_indices) / self.k)
+            # Get k nearest neighbors
+            knn_indices = np.argsort(batch_distances, axis=1)[:, :self.k]
+            knn_distances = np.take_along_axis(batch_distances, knn_indices, axis=1)
+            knn_labels = labels_np[knn_indices]  # Shape: (batch_size, k)
+
+            # Compute metrics per batch
+            knn_same_class = (knn_labels == batch_targets[:, None])
+            knn_other_class = ~knn_same_class
+
+            # Closest same class distances
+            min_same_class_dist_batch = np.where(knn_same_class, knn_distances, np.inf).min(axis=1)
+            min_other_class_dist_batch = np.where(knn_other_class, knn_distances, np.inf).min(axis=1)
+            closest_distance_ratios_batch = min_same_class_dist_batch / min_other_class_dist_batch
+
+            closest_same_class_distances.extend(min_same_class_dist_batch.tolist())
+            closest_other_class_distances.extend(min_other_class_dist_batch.tolist())
+            closest_distance_ratios.extend(closest_distance_ratios_batch.tolist())
+
+            # Average distances
+            avg_same_dist_batch = np.nanmean(np.where(knn_same_class, knn_distances, np.nan), axis=1)
+            avg_other_dist_batch = np.nanmean(np.where(knn_other_class, knn_distances, np.nan), axis=1)
+            avg_all_dist_batch = knn_distances.mean(axis=1)
+            avg_distance_ratios_batch = avg_same_dist_batch / avg_other_dist_batch
+
+            avg_same_class_distances.extend(avg_same_dist_batch.tolist())
+            avg_other_class_distances.extend(avg_other_dist_batch.tolist())
+            avg_all_class_distances.extend(avg_all_dist_batch.tolist())
+            avg_distance_ratios.extend(avg_distance_ratios_batch.tolist())
+
+            # Percentage of same and other class in kNN
+            percentage_same_class_knn_batch = knn_same_class.sum(axis=1) / self.k
+            percentage_other_class_knn_batch = knn_other_class.sum(axis=1) / self.k
+
+            percentage_same_class_knn.extend(percentage_same_class_knn_batch.tolist())
+            percentage_other_class_knn.extend(percentage_other_class_knn_batch.tolist())
+
+            # Adapted N3
+            nearest_neighbor_labels = knn_labels[:, 0]
+            n3_different_class_batch = (nearest_neighbor_labels != batch_targets).astype(int)
+            n3_different_class.extend(n3_different_class_batch.tolist())
+
+            # Adapted N1
+            for idx_in_batch, idx in enumerate(batch_indices):
+                neighbors = mst_neighbors.get(idx, [])
+                different_class = any(
+                    labels_np[neighbor_idx] != batch_targets[idx_in_batch] for neighbor_idx in neighbors)
+                n1_different_class.append(1 if different_class else 0)
+
+        # Compute adapted N1 and N3 per class
+        unique_classes = np.unique(labels_np)
+        adapted_N1 = {}
+        adapted_N3 = {}
+
+        labels_array = np.array(labels_np.tolist())
+        n1_array = np.array(n1_different_class)
+        n3_array = np.array(n3_different_class)
+
+        for cls in unique_classes:
+            class_indices = np.where(labels_array == cls)[0]
+            n1_class = n1_array[class_indices]
+            n3_class = n3_array[class_indices]
+
+            adapted_N1[cls] = n1_class.mean()
+            adapted_N3[cls] = n3_class.mean()
+
+        print("Adapted N1 per class:", adapted_N1)
+        print("Adapted N3 per class:", adapted_N3)
 
         return (
             same_centroid_dists,
@@ -201,7 +264,9 @@ class Proximity:
             avg_all_class_distances,
             avg_distance_ratios,
             percentage_same_class_knn,
-            percentage_other_class_knn
+            percentage_other_class_knn,
+            adapted_N1,
+            adapted_N3
         )
 
 

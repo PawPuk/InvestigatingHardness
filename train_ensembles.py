@@ -112,7 +112,8 @@ class EnsembleTrainer:
             ax.set_ylabel('Avg Accuracy')
 
         plt.tight_layout()
-        plt.savefig(f'{u.CLASS_BIAS_SAVE_DIR}full{self.dataset_name}_class_bias_on_{self.model_type}ensemble.png')
+        plt.savefig(f'{u.CLASS_BIAS_SAVE_DIR}{self.training}{self.dataset_name}_class_bias_on_'
+                    f'{self.model_type}ensemble.png')
         plt.show()
 
 
