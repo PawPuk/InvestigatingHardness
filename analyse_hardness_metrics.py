@@ -611,6 +611,7 @@ def compute_iou(adaptive_indices, full_indices):
 def main(dataset_name: str, model_type: str):
     # Define file paths for saving and loading cached results
     full_accuracies_file = f"{u.HARD_IMBALANCE_DIR}full{dataset_name}_avg_class_accuracies_on_{model_type}ensemble.pkl"
+    part_accuracies_file = f"{u.HARD_IMBALANCE_DIR}part{dataset_name}_avg_class_accuracies_on_{model_type}ensemble.pkl"
     full_proximity_file = f"{u.HARD_IMBALANCE_DIR}full{dataset_name}_proximity_indicators.pkl"
     part_proximity_file = f"{u.HARD_IMBALANCE_DIR}part{dataset_name}_proximity_indicators.pkl"
     full_curvature_file = f"{u.HARD_IMBALANCE_DIR}full{dataset_name}_curvature_indicators.pkl"
@@ -618,7 +619,7 @@ def main(dataset_name: str, model_type: str):
     metric_abbreviations = [
         'SameCentroidDist', 'OtherCentroidDist', 'CentroidDistRatio', 'Same1NNDist', 'Other1NNDist', '1NNRatioDist',
         'AvgSame40NNDist', 'AvgOther40NNDist', 'AvgAll40NNDist', 'Avg40NNDistRatio', '40NNPercSame', '40NNPercOther',
-        'N1', 'N3', 'GausCurv', 'MeanCurv'
+        'N3', 'GausCurv', 'MeanCurv'
     ]
 
     # Load the dataset and metrics
@@ -626,6 +627,8 @@ def main(dataset_name: str, model_type: str):
     part_training_dataset, _ = u.load_data_and_normalize(dataset_name)
     full_avg_class_accuracies = u.load_data(full_accuracies_file)
     full_avg_class_accuracies = np.sum(full_avg_class_accuracies, axis=0) / len(full_avg_class_accuracies)
+    part_avg_class_accuracies = u.load_data(part_accuracies_file)
+    part_avg_class_accuracies = np.sum(part_avg_class_accuracies, axis=0) / len(part_avg_class_accuracies)
     full_proximity_metrics = u.load_data(full_proximity_file)
     part_proximity_metrics = u.load_data(part_proximity_file)
     full_curvature_metrics = u.load_data(full_curvature_file)
@@ -637,7 +640,7 @@ def main(dataset_name: str, model_type: str):
     part_training_labels = part_training_dataset.tensors[1].numpy()
     num_classes = len(np.unique(full_training_labels))
     full_class_averages = compute_class_averages_of_metrics(full_hardness_metrics, full_training_labels)
-    invert_metrics = [False, True, False, False, True, False, False, True, False, False, True, False, False, False,
+    invert_metrics = [False, True, False, False, True, False, False, True, False, False, True, False, False,
                       False, False]
 
     # Extract the hardest samples for each metric and compute their class distributions
@@ -655,19 +658,20 @@ def main(dataset_name: str, model_type: str):
     # Measure the correlation between the distributions of hard samples and class-level accuracies
     for training in ['full', 'part']:
         distributions = [full_distributions, part_distributions][training == 'part']
-        compare_metrics_to_class_accuracies(distributions[0], full_avg_class_accuracies, num_classes,
+        accuracies = [full_avg_class_accuracies, part_avg_class_accuracies][training == 'part']
+        compare_metrics_to_class_accuracies(distributions[0], accuracies, num_classes,
                                             f'{training}{model_type}{dataset_name}_adaptive_easyPCC.pdf',
                                             f'{training}{model_type}{dataset_name}_adaptive_easySRC.pdf')
-        compare_metrics_to_class_accuracies(distributions[1], full_avg_class_accuracies, num_classes,
+        compare_metrics_to_class_accuracies(distributions[1], accuracies, num_classes,
                                             f'{training}{model_type}{dataset_name}_adaptive_hardPCC.pdf',
                                             f'{training}{model_type}{dataset_name}_adaptive_hardSRC.pdf')
-        compare_metrics_to_class_accuracies(distributions[2], full_avg_class_accuracies, num_classes,
+        compare_metrics_to_class_accuracies(distributions[2], accuracies, num_classes,
                                             f'{training}{model_type}{dataset_name}_fixed_easyPCC.pdf',
                                             f'{training}{model_type}{dataset_name}_fixed_easySRC.pdf')
-        compare_metrics_to_class_accuracies(distributions[3], full_avg_class_accuracies, num_classes,
+        compare_metrics_to_class_accuracies(distributions[3], accuracies, num_classes,
                                             f'{training}{model_type}{dataset_name}_fixed_hardPCC.pdf',
                                             f'{training}{model_type}{dataset_name}_fixed_hardSRC.pdf')
-        compare_metrics_to_class_accuracies(full_class_averages, full_avg_class_accuracies, num_classes,
+        compare_metrics_to_class_accuracies(full_class_averages, accuracies, num_classes,
                                             f'{training}{model_type}{dataset_name}_avgPCC.pdf',
                                             f'{training}{model_type}{dataset_name}_avgSRC.pdf')
 

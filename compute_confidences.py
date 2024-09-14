@@ -7,7 +7,7 @@ import torch
 from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 
-from geometric_measures import Curvature, Disjuncts, Proximity
+from geometric_measures import Curvature, Proximity
 from neural_networks import LeNet
 import utils as u
 
