@@ -340,7 +340,7 @@ def compare_metrics_to_class_accuracies(class_distributions, avg_class_accuracie
     metric_abbreviations = [
         'SameCentroidDist', 'OtherCentroidDist', 'CentroidDistRatio', 'Same1NNDist', 'Other1NNDist', '1NNRatioDist',
         'AvgSame40NNDist', 'AvgOther40NNDist', 'AvgAll40NNDist', 'Avg40NNDistRatio', '40NNPercSame', '40NNPercOther',
-        'N1', 'N3', 'GausCurv', 'MeanCurv'
+        'N3', 'GaussCurv', 'MeanCurv'
     ]  # Abbreviations for each metric to keep plot readable.
 
     # Compute both PCC and Spearman for each metric
@@ -619,7 +619,7 @@ def main(dataset_name: str, model_type: str):
     metric_abbreviations = [
         'SameCentroidDist', 'OtherCentroidDist', 'CentroidDistRatio', 'Same1NNDist', 'Other1NNDist', '1NNRatioDist',
         'AvgSame40NNDist', 'AvgOther40NNDist', 'AvgAll40NNDist', 'Avg40NNDistRatio', '40NNPercSame', '40NNPercOther',
-        'N3', 'GausCurv', 'MeanCurv'
+        'N3', 'GaussCurv', 'MeanCurv'
     ]
 
     # Load the dataset and metrics

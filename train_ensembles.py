@@ -101,10 +101,8 @@ class EnsembleTrainer:
             mean_acc = running_avg_class_accuracies[:, class_idx]
             std_acc = running_std_class_accuracies[:, class_idx]
 
-            # Plot mean accuracy
+            # Plot accuracy
             ax.plot(x_vals, mean_acc, label='Mean Accuracy')
-
-            # Plot standard deviation as a shaded area
             ax.fill_between(x_vals, mean_acc - std_acc, mean_acc + std_acc, color='gray', alpha=0.3, label='Std Dev')
 
             ax.set_title(f'Class {class_idx}')

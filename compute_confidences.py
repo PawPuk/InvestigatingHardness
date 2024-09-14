@@ -65,19 +65,6 @@ def compute_proximity_metrics(loader: DataLoader, k2: int):
     return proximity_metrics
 
 
-def compute_disjuncts(loader: DataLoader):
-    total_samples = sum(len(data) for data, _ in loader)
-    disjunct_metrics = [[None] * total_samples, [None] * total_samples]
-    class_loaders, class_indices = divide_by_class(loader)
-    for cls, class_loader in tqdm(class_loaders.items(), desc='Iterating through classes.'):
-        for data, _ in class_loader:
-            data.to(u.DEVICE)
-            for i, method in tqdm(enumerate(['custom', 'gmm']), desc='Computing disjuncts.'):
-                Disjuncts(data, class_indices).compute_disjunct_statistics(method, disjunct_metrics[i])
-
-    return tuple(disjunct_metrics)
-
-
 """def main(dataset_name: str, models_count: int, long_tailed: bool, imbalance_ratio: float):
     train_dataset, _ = u.load_data_and_normalize(dataset_name, long_tailed, imbalance_ratio)
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=False)

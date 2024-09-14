@@ -79,8 +79,8 @@ def calculate_mean_std(accuracies: List[float]) -> Tuple[float, float]:
 
 def reduce_dimensionality(dataset_name: str, data: torch.Tensor, apply_pca: bool = False) -> torch.Tensor:
     """
-    Optionally reduces the dimensionality of the data to match that of MNIST (784) if the dataset is CIFAR10 or CIFAR100.
-    For other datasets like MNIST, it simply returns the data as is.
+    Optionally reduces the dimensionality of the data to match the data/dimensionality ratio of MNIST if the dataset is
+    CIFAR10 or CIFAR100. For other datasets like MNIST, it simply returns the data as is.
 
     :param dataset_name: Name of the dataset.
     :param data: Data tensor of shape (N, C, H, W).
@@ -91,12 +91,12 @@ def reduce_dimensionality(dataset_name: str, data: torch.Tensor, apply_pca: bool
         N = data.shape[0]
         # Flatten the data: (N, C, H, W) -> (N, C*H*W)
         data_flat = data.view(N, -1)
-        # Perform PCA to reduce dimensions to 784
-        pca = PCA(n_components=784)
+        # Perform PCA to reduce dimensions to 672
+        pca = PCA(n_components=672)
         data_reduced = pca.fit_transform(data_flat.numpy())
         # Convert back to tensor
         data_reduced = torch.from_numpy(data_reduced).float()
-        return data_reduced  # Shape: (N, 784)
+        return data_reduced  # Shape: (N, 672)
     else:
         return data  # Return data as is
 

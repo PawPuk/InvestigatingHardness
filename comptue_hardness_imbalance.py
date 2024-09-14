@@ -1,39 +1,46 @@
-import numpy as np
+import argparse
+from glob import glob
 from typing import List
 
 from matplotlib.lines import Line2D
 import matplotlib.pyplot as plt
+import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from neural_networks import LeNet
 import utils as u
 
 
 class HardnessImbalanceMeasurer:
-    def __init__(self, dataset_name: str, models_count: int, training: str, model_type: str):
+    def __init__(self, dataset_name: str, training: str, model_type: str):
         self.dataset_name = dataset_name
-        self.models_count = models_count
         self.training = training
+        self.model_type = model_type
         self.easy_indices, self.hard_indices, _, _ = u.load_data(
             f'{u.DIVISIONS_SAVE_DIR}/{training}{dataset_name}_indices.pkl')
         self.models = []
-        for i in range(self.models_count):
-            model, _ = u.initialize_models(dataset_name, model_type).to(u.DEVICE)
-            model_file = f"{u.MODEL_SAVE_DIR}{self.training}{self.dataset_name}_{self.models_count}_" \
-                         f"{model_type}ensemble_{i}.pth"
-            model.load_state_dict(torch.load(model_file, map_location=u.DEVICE))
+        self.model_paths = self.get_all_trained_model_paths()
+        # Load models from memory (similar to the logic in `EnsembleTrainer.train_ensemble`)
+        for model_path in self.model_paths:
+            model, _ = u.initialize_models(dataset_name, model_type)
+            model.load_state_dict(torch.load(model_path, map_location=u.DEVICE))
             self.models.append(model)
         if self.training == 'full':
             training_dataset = u.load_full_data_and_normalize(self.dataset_name)
-            test_dataset = training_dataset  # TODO: Do I have to use deepcopy.copy() here?
+            test_dataset = training_dataset
             self.dataset_size = len(training_dataset)
         else:
             training_dataset, test_dataset = u.load_data_and_normalize(self.dataset_name)
             self.dataset_size = len(training_dataset) + len(test_dataset)
             self.test_size = len(test_dataset)
-        self.loader = DataLoader(test_dataset, batch_size=1000, shuffle=False)
+        self.loader = DataLoader(test_dataset, batch_size=len(test_dataset), shuffle=False)
+
+    def get_all_trained_model_paths(self):
+        """Retrieve all trained model paths matching current dataset, training, and model type."""
+        pattern = f"{u.MODEL_SAVE_DIR}{self.training}{self.dataset_name}_{self.model_type}ensemble_*.pth"
+        model_paths = glob(pattern)
+        return sorted(model_paths)
 
     def measure_imbalance_on_one_model(self, model: torch.nn.Module, extreme_indices: List[int]) -> float:
         """Test a single model on a specific set of samples (given by indices) and return accuracy."""
@@ -118,48 +125,93 @@ class HardnessImbalanceMeasurer:
         plt.savefig('hardness_based_imbalances.png')
         plt.show()
 
+    def plot_consistency(self, easy_accuracies, hard_accuracies, metric_abbreviations: List[str], num_metrics):
+        """Plot how easy and hard accuracies change as we increase the number of models for each metric."""
+        fig, axes = plt.subplots(3, 5, figsize=(20, 12))
+
+        total_models = len(easy_accuracies)
+
+        # Compute running averages and standard deviations
+        running_avg_easy = np.array([np.mean(easy_accuracies[:i+1], axis=0) for i in range(total_models)])
+        running_std_easy = np.array([np.std(easy_accuracies[:i+1], axis=0) for i in range(total_models)])
+        running_avg_hard = np.array([np.mean(hard_accuracies[:i+1], axis=0) for i in range(total_models)])
+        running_std_hard = np.array([np.std(hard_accuracies[:i+1], axis=0) for i in range(total_models)])
+
+        for metric_idx in range(num_metrics):
+            row, col = divmod(metric_idx, 5)  # Calculate row and column indices for the subplot
+            ax = axes[row, col]
+            x_vals = range(1, total_models + 1)
+            mean_easy = running_avg_easy[:, metric_idx]
+            std_easy = running_std_easy[:, metric_idx]
+            mean_hard = running_avg_hard[:, metric_idx]
+            std_hard = running_std_hard[:, metric_idx]
+
+            # Plot easy and hard accuracies
+            ax.plot(x_vals, mean_easy, label='Easy Accuracy', color='blue')
+            ax.fill_between(x_vals, mean_easy - std_easy, mean_easy + std_easy, color='blue', alpha=0.3)
+            ax.plot(x_vals, mean_hard, label='Hard Accuracy', color='red')
+            ax.fill_between(x_vals, mean_hard - std_hard, mean_hard + std_hard, color='red', alpha=0.3)
+
+            ax.set_title(f'Metric {metric_abbreviations[metric_idx]}')
+            ax.set_xlabel('Number of Models')
+            ax.set_ylabel('Accuracy')
+            ax.legend()
+
+        plt.tight_layout()
+        plt.savefig(f'{u.CONSISTENCY_SAVE_DIR}{self.model_type}_{self.training}{self.dataset_name}_imbalance_'
+                    f'consistency.png')
+        plt.show()
+
     def measure_and_visualize_hardness_based_imbalance(self):
         """Test an ensemble of models on the dataset, returning accuracies for each metric."""
-        accuracies = []
+        accuracies, easy_accuracies, hard_accuracies = [], [], []
         metric_abbreviations = [
             'SameCentroidDist', 'OtherCentroidDist', 'CentroidDistRatio', 'Same1NNDist', 'Other1NNDist', '1NNRatioDist',
-            'AvgSame40NNDist', 'AvgOther40NNDist', 'AvgAll40NNDist', 'Avg40NNDistRatio', '40NNPercSame', '40NNPercOther'
+            'AvgSame40NNDist', 'AvgOther40NNDist', 'AvgAll40NNDist', 'Avg40NNDistRatio', '40NNPercSame',
+            '40NNPercOther', 'N3', 'GaussCurv', 'MeanCurv'
         ]
 
         for metric_idx in tqdm(range(len(self.easy_indices)), desc='Iterating through metrics'):
             metric_easy_indices = self.easy_indices[metric_idx]
             metric_hard_indices = self.hard_indices[metric_idx]
 
-            all_accuracies, easy_accuracies, hard_accuracies = [], [], []
+            all_accuracies, easy_acc, hard_acc = [], [], []
 
             for model in self.models:
                 all_accuracies.append(self.measure_imbalance_on_one_model(model, list(range(self.dataset_size))))
-                easy_accuracies.append(self.measure_imbalance_on_one_model(model, metric_easy_indices))
-                hard_accuracies.append(self.measure_imbalance_on_one_model(model, metric_hard_indices))
-            # TODO: make a similar figure for imbalance as for the class bias to measure its consistency
+                easy_acc.append(self.measure_imbalance_on_one_model(model, metric_easy_indices))
+                hard_acc.append(self.measure_imbalance_on_one_model(model, metric_hard_indices))
+
+            easy_accuracies.append(easy_acc)
+            hard_accuracies.append(hard_acc)
+
             accuracies.append({
                 'metric': metric_idx,
                 'mean_acc_all': np.mean(all_accuracies),
                 'std_acc_all': np.std(all_accuracies),
-                'mean_acc_easy': np.mean(easy_accuracies),
-                'std_acc_easy': np.std(easy_accuracies),
-                'mean_acc_hard': np.mean(hard_accuracies),
-                'std_acc_hard': np.std(hard_accuracies)
+                'mean_acc_easy': np.mean(easy_acc),
+                'std_acc_easy': np.std(easy_acc),
+                'mean_acc_hard': np.mean(hard_acc),
+                'std_acc_hard': np.std(hard_acc)
             })
+
+        # Plot error rates
         self.plot_error_rates(accuracies, metric_abbreviations)
+
+        # Plot consistency
+        self.plot_consistency(easy_accuracies, hard_accuracies, metric_abbreviations, len(self.easy_indices))
 
 
 if __name__ == "__main__":
-    import argparse
-
     # Argument parser for dataset_name and models_count
     parser = argparse.ArgumentParser(description="Load easy/hard indices and pre-trained models.")
     parser.add_argument("--dataset_name", type=str, default='MNIST',
                         help="Name of the dataset (e.g., MNIST, CIFAR10, etc.)")
-    parser.add_argument("--models_count", type=int, default='100', help="Number of models in the ensemble")
-    parser.add_argument('--training', type=str, choices=['full', 'part'], default='full',
+    parser.add_argument('--training', type=str, choices=['full', 'part'], default='part',
                         help='Indicates which models to choose for evaluations - the ones trained on the entire dataset'
                              ' (full), or the ones trained only on the training set (part).')
+    parser.add_argument('--model_type', type=str, choices=['simple', 'complex'], default='complex',
+                        help='Specifies the type of network used for training (MLP vs LeNet or ResNet20 vs ResNet56).')
     args = parser.parse_args()
 
     # Call the main function with the parsed arguments
