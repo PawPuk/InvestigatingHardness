@@ -102,7 +102,7 @@ class Proximity:
         return samples, labels
 
     def compute_proximity_metrics(self):
-        """Compute proximity metrics for each sample in the dataset, including KNN curvature."""
+        """Compute proximity metrics for each sample in the dataset."""
         num_samples = self.samples.size(0)
 
         # Flatten samples
@@ -140,22 +140,6 @@ class Proximity:
 
         n3_different_class = []
 
-        # Build MST
-        mst_sparse = minimum_spanning_tree(csr_matrix(distance_matrix))
-        mst_sparse_undirected = mst_sparse + mst_sparse.T  # Make the MST undirected
-
-        # Extract the edges from the MST
-        mst_coo = mst_sparse_undirected.tocoo()
-        edges = list(zip(mst_coo.row, mst_coo.col))
-
-        # Build a neighbor map from the MST
-        mst_neighbors = {}
-        for i, j in edges:
-            mst_neighbors.setdefault(i, set()).add(j)
-            mst_neighbors.setdefault(j, set()).add(i)
-
-        # Initialize list for adapted N1
-        n1_different_class = []
         batch_size = 1000
         # For each sample, compute metrics
         for start_idx in tqdm(range(0, num_samples, batch_size), desc='Computing sample-level proximity metrics.'):
@@ -225,32 +209,18 @@ class Proximity:
             n3_different_class_batch = (nearest_neighbor_labels != batch_targets).astype(int)
             n3_different_class.extend(n3_different_class_batch.tolist())
 
-            # Adapted N1
-            for idx_in_batch, idx in enumerate(batch_indices):
-                neighbors = mst_neighbors.get(idx, [])
-                different_class = any(
-                    labels_np[neighbor_idx] != batch_targets[idx_in_batch] for neighbor_idx in neighbors)
-                n1_different_class.append(1 if different_class else 0)
-
-        # Compute adapted N1 and N3 per class
+        # Compute adapted N3 per class
         unique_classes = np.unique(labels_np)
-        adapted_N1 = {}
         adapted_N3 = {}
 
-        labels_array = np.array(labels_np.tolist())
-        n1_array = np.array(n1_different_class)
+        labels_array = labels_np
         n3_array = np.array(n3_different_class)
 
         for cls in unique_classes:
             class_indices = np.where(labels_array == cls)[0]
-            n1_class = n1_array[class_indices]
             n3_class = n3_array[class_indices]
 
-            adapted_N1[cls] = n1_class.mean()
             adapted_N3[cls] = n3_class.mean()
-
-        print("Adapted N1 per class:", adapted_N1)
-        print("Adapted N3 per class:", adapted_N3)
 
         return (
             same_centroid_dists,
@@ -265,9 +235,9 @@ class Proximity:
             avg_distance_ratios,
             percentage_same_class_knn,
             percentage_other_class_knn,
-            adapted_N1,
             adapted_N3
         )
+
 
 
 class Disjuncts:
