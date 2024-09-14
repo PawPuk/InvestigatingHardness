@@ -5,8 +5,6 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from scipy.spatial.distance import cdist, pdist, squareform
-from scipy.sparse.csgraph import minimum_spanning_tree
-from scipy.sparse import csr_matrix
 from sklearn.cluster import DBSCAN
 from sklearn.mixture import GaussianMixture
 from sklearn.neighbors import NearestNeighbors
@@ -68,60 +66,68 @@ class Proximity:
         """Initialize with the data loader and set K for KNN."""
         self.loader = loader
         self.k = k
-        self.samples, self.labels = self.collect_samples()
         self.centroids = self.compute_centroids()
+        self.samples, self.labels = self.collect_samples()
 
     def compute_centroids(self):
-        """Compute the centroids for each class using vectorized operations."""
-        # Flatten samples
-        samples_flat = self.samples.view(self.samples.size(0), -1)
-        labels = self.labels
+        """Compute the centroids for each class."""
+        centroids, class_counts = {}, {}
 
-        # Get unique classes
-        classes = torch.unique(labels)
+        for data, targets in self.loader:
+            data, targets = data.to(u.DEVICE), targets.to(u.DEVICE)
+            unique_classes = torch.unique(targets)
 
-        # Initialize centroids dictionary
-        centroids = {}
+            for cls in unique_classes:
+                class_mask = (targets == cls)
+                class_data = data[class_mask]
 
-        # Compute centroids vectorized
-        for cls in classes:
-            class_mask = (labels == cls)
-            class_samples = samples_flat[class_mask]
-            centroids[cls.item()] = class_samples.mean(dim=0)
+                if cls.item() not in centroids:
+                    centroids[cls.item()] = torch.zeros_like(class_data[0])
+                    class_counts[cls.item()] = 0
+
+                centroids[cls.item()] += class_data.sum(dim=0)
+                class_counts[cls.item()] += class_data.size(0)
+
+        # Finalize the centroids by dividing by the number of samples per class
+        for cls in centroids:
+            centroids[cls] /= class_counts[cls]
 
         return centroids
 
     def collect_samples(self):
         """Collect all samples and their corresponding labels from the loader."""
-        samples_list, labels_list = [], []
+        samples = []
+        labels = []
         for data, targets in self.loader:
-            samples_list.append(data)
-            labels_list.append(targets)
-        samples = torch.cat(samples_list).to(u.DEVICE)
-        labels = torch.cat(labels_list).to(u.DEVICE)
+            samples.append(data.to(u.DEVICE))
+            labels.append(targets.to(u.DEVICE))
+        samples = torch.cat(samples)
+        labels = torch.cat(labels)
         return samples, labels
 
     def compute_proximity_metrics(self):
-        """Compute proximity metrics for each sample in the dataset."""
+        """Compute proximity metrics for each sample in the dataset, including KNN curvature and adapted N3."""
         num_samples = self.samples.size(0)
 
-        # Flatten samples
-        samples_flat = self.samples.view(num_samples, -1).cpu().numpy()
+        # Flatten samples and move to CPU for sklearn
+        flattened_samples = self.samples.view(num_samples, -1).cpu().numpy()
         labels_np = self.labels.cpu().numpy()
 
-        # Compute distance matrix
-        distance_matrix = squareform(pdist(samples_flat, metric='euclidean'))
+        # Prepare KNN classifier
+        knn = NearestNeighbors(n_neighbors=self.k + 1)  # +1 to include the sample itself
+        knn.fit(flattened_samples)
 
         # Prepare centroids
         classes = sorted(self.centroids.keys())
         centroids_list = [self.centroids[cls] for cls in classes]
         centroids_tensor = torch.stack(centroids_list).cpu()  # Shape: (n_classes, feature_dim)
+        centroids_flat = centroids_tensor.numpy()  # Shape: (n_classes, feature_dim)
 
         # Compute distances from all samples to all centroids
-        centroids_flat = centroids_tensor.numpy()  # Shape: (n_classes, feature_dim)
-        sample_to_centroid_dists = cdist(samples_flat, centroids_flat, metric='euclidean')  # (n_samples, n_classes)
+        diff = flattened_samples[:, np.newaxis, :] - centroids_flat[np.newaxis, :, :]
+        sample_to_centroid_dists = np.linalg.norm(diff, axis=2)  # Shape: (n_samples, n_classes)
 
-        # Prepare lists for metrics
+        # Initialize lists for metrics
         same_centroid_dists = []
         other_centroid_dists = []
         centroid_ratios = []
@@ -141,22 +147,22 @@ class Proximity:
         n3_different_class = []
 
         batch_size = 1000
-        # For each sample, compute metrics
+        # For each batch, compute metrics
         for start_idx in tqdm(range(0, num_samples, batch_size), desc='Computing sample-level proximity metrics.'):
             end_idx = min(start_idx + batch_size, num_samples)
             batch_indices = np.arange(start_idx, end_idx)
-            batch_targets = labels_np[batch_indices]
+            batch_samples = flattened_samples[batch_indices]
+            batch_labels = labels_np[batch_indices]
 
             # Centroid distances for the batch
             batch_centroid_dists = sample_to_centroid_dists[batch_indices]  # Shape: (batch_size, n_classes)
 
             # Get same and other centroid distances
-            target_class_indices = [classes.index(t) for t in batch_targets]
+            target_class_indices = [classes.index(t) for t in batch_labels]
             same_centroid_dists_batch = batch_centroid_dists[np.arange(len(batch_indices)), target_class_indices]
             other_centroid_dists_batch = batch_centroid_dists.copy()
             other_centroid_dists_batch[np.arange(len(batch_indices)), target_class_indices] = np.inf
             min_other_centroid_dists_batch = np.min(other_centroid_dists_batch, axis=1)
-
             centroid_ratios_batch = same_centroid_dists_batch / min_other_centroid_dists_batch
 
             same_centroid_dists.extend(same_centroid_dists_batch.tolist())
@@ -164,20 +170,20 @@ class Proximity:
             centroid_ratios.extend(centroid_ratios_batch.tolist())
 
             # KNN computations for the batch
-            batch_distances = distance_matrix[batch_indices]  # Shape: (batch_size, num_samples)
-            # Set self-distances to np.inf
-            batch_distances[np.arange(len(batch_indices)), batch_indices] = np.inf
+            distances, indices = knn.kneighbors(batch_samples, n_neighbors=self.k + 1, return_distance=True)
 
-            # Get k nearest neighbors
-            knn_indices = np.argsort(batch_distances, axis=1)[:, :self.k]
-            knn_distances = np.take_along_axis(batch_distances, knn_indices, axis=1)
+            # Exclude self (first neighbor)
+            distances = distances[:, 1:]  # Shape: (batch_size, k)
+            indices = indices[:, 1:]      # Shape: (batch_size, k)
+            knn_distances = distances
+            knn_indices = indices
             knn_labels = labels_np[knn_indices]  # Shape: (batch_size, k)
 
             # Compute metrics per batch
-            knn_same_class = (knn_labels == batch_targets[:, None])
+            knn_same_class = (knn_labels == batch_labels[:, None])
             knn_other_class = ~knn_same_class
 
-            # Closest same class distances
+            # Closest distances to the same and other class samples + ratio
             min_same_class_dist_batch = np.where(knn_same_class, knn_distances, np.inf).min(axis=1)
             min_other_class_dist_batch = np.where(knn_other_class, knn_distances, np.inf).min(axis=1)
             closest_distance_ratios_batch = min_same_class_dist_batch / min_other_class_dist_batch
@@ -204,9 +210,9 @@ class Proximity:
             percentage_same_class_knn.extend(percentage_same_class_knn_batch.tolist())
             percentage_other_class_knn.extend(percentage_other_class_knn_batch.tolist())
 
-            # Adapted N3
+            # Adapted N3 computation
             nearest_neighbor_labels = knn_labels[:, 0]
-            n3_different_class_batch = (nearest_neighbor_labels != batch_targets).astype(int)
+            n3_different_class_batch = (nearest_neighbor_labels != batch_labels).astype(int)
             n3_different_class.extend(n3_different_class_batch.tolist())
 
         # Compute adapted N3 per class
@@ -237,96 +243,3 @@ class Proximity:
             percentage_other_class_knn,
             adapted_N3
         )
-
-
-
-class Disjuncts:
-    def __init__(self, data, data_indices):
-        """Initialize with the data loader and K for custom clustering method."""
-        self.data = data.reshape(data.shape[0], -1).cpu().numpy()  # Flatten the images (required for image datasets)
-        self.data_indices = data_indices
-
-    def custom_clustering(self, disjunct_metrics):
-        """Custom clustering based on path-based method with KNN."""
-        # Perform KNN for each sample
-        knn = NearestNeighbors(n_neighbors=len(self.data), n_jobs=-1)  # Use all available CPU cores
-        knn.fit(self.data)
-        distances, _ = knn.kneighbors(self.data)
-        # Compute the average distance to use as a threshold
-        avg_distance = np.mean(distances[:, 1:])
-
-        # Create an adjacency matrix where edges exist if distance is less than the threshold
-        adjacency_matrix = distances[:, 1:] < avg_distance
-
-        # Initialize clusters with disjoint sets
-        clusters = defaultdict(list)
-        visited = set()
-
-        def dfs(node, cluster_id):
-            visited.add(node)
-            clusters[cluster_id].append(node)
-            for neighbor, is_connected in enumerate(adjacency_matrix[node]):
-                if is_connected and neighbor not in visited:
-                    dfs(neighbor, cluster_id)
-
-        # A dataset belongs to a cluster if it's within dist < avg_distance of any other sample from the cluster
-        cluster_id = 0
-        for i in range(len(self.data)):
-            if i not in visited:
-                dfs(i, cluster_id)
-                cluster_id += 1
-
-        # Compute the size of the cluster for each sample
-        cluster_sizes = [len(clusters[cluster_id]) for cluster_id in clusters]
-        for i in range(len(cluster_sizes)):
-            for node in clusters[i]:
-                if disjunct_metrics[self.data_indices[node]] is not None:
-                    raise Exception
-                disjunct_metrics[self.data_indices[node]] = cluster_sizes[i]
-
-    def gmm_clustering(self, disjunct_metrics: List[None], n_components: int):
-        """GMM-based clustering."""
-
-        gmm = GaussianMixture(n_components=n_components, covariance_type='full')
-        gmm.fit(self.data)
-        cluster_labels = gmm.predict(self.data)
-
-        # Compute the size of the cluster for each sample
-        cluster_sizes = np.bincount(cluster_labels)
-        for i in range(len(self.data)):
-            if disjunct_metrics[self.data_indices[i]] is not None:
-                raise Exception
-            disjunct_metrics[self.data_indices[i]] = cluster_sizes[cluster_labels[i]]
-
-    def dbscan_clustering(self, disjunct_metrics: List[None], eps: float, min_samples: int):
-        """DBSCAN-based clustering."""
-        dbscan = DBSCAN(eps=eps, min_samples=min_samples)
-        cluster_labels = dbscan.fit_predict(self.data)
-
-        # Compute the size of the cluster for each sample
-        cluster_sizes = np.bincount(cluster_labels)
-        for i in range(len(self.data)):
-            if disjunct_metrics[self.data_indices[i]] is not None:
-                raise Exception
-            disjunct_metrics[self.data_indices[i]] = cluster_sizes[cluster_labels[i]]
-
-    def compute_disjunct_statistics(self, method: str, disjunct_metrics: List[None], **kwargs):
-        """
-        Compute disjunct statistics based on the specified method.
-
-        :param method: The method to use ('custom', 'gmm', 'dbscan').
-        :param disjunct_metrics: A list that will be populated with the disjunct metrics
-        :param kwargs: Additional parameters for the clustering method.
-        :return: List of disjunct statistics for each sample.
-        """
-        if method == 'custom':
-            return self.custom_clustering(disjunct_metrics)
-        elif method == 'gmm':
-            n_components = kwargs.get('n_components', 10)  # Default to 10 components for GMM
-            return self.gmm_clustering(disjunct_metrics, n_components)
-        elif method == 'dbscan':
-            eps = kwargs.get('eps', 0.5)  # Default epsilon for DBSCAN
-            min_samples = kwargs.get('min_samples', 5)  # Default minimum samples for DBSCAN
-            return self.dbscan_clustering(disjunct_metrics, eps, min_samples)
-        else:
-            raise ValueError("Invalid method. Choose 'custom', 'gmm', or 'dbscan'.")
