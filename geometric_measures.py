@@ -1,12 +1,6 @@
-from collections import defaultdict
-from typing import List
-
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
-from scipy.spatial.distance import cdist, pdist, squareform
-from sklearn.cluster import DBSCAN
-from sklearn.mixture import GaussianMixture
 from sklearn.neighbors import NearestNeighbors
 from sklearn.decomposition import PCA
 from tqdm import tqdm

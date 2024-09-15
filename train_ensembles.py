@@ -76,12 +76,10 @@ class EnsembleTrainer:
             model, _ = u.initialize_models(self.dataset_name, self.model_type)
             model.load_state_dict(torch.load(model_path))
             # Evaluate the model on the test set
-            accuracy = u.test(model, test_loader)
             class_accuracies[idx] = u.class_level_test(model, test_loader, num_classes)
-            print(f'Model {idx} finished evaluation, achieving accuracy of {accuracy}% on the test set.')
 
         # Save class accuracies
-        class_accuracies_file = f"{u.HARD_IMBALANCE_DIR}{self.training}{self.dataset_name}" \
+        class_accuracies_file = f"{u.METRICS_SAVE_DIR}{self.training}{self.dataset_name}" \
                                 f"_avg_class_accuracies_on_{self.model_type}ensemble.pkl"
         u.save_data(class_accuracies, class_accuracies_file)
 

@@ -1,14 +1,11 @@
-import argparse
-from typing import Dict, List, Tuple, Any
+from typing import Dict, List, Tuple
 
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 
 from geometric_measures import Curvature, Proximity
-from neural_networks import LeNet
 import utils as u
 
 np.random.seed(42)

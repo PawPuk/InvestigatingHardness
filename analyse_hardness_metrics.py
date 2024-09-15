@@ -9,9 +9,7 @@ import pandas as pd
 from scipy.signal import savgol_filter
 from scipy.stats import kendalltau, pearsonr, spearmanr
 import torch
-from torch.utils.data import DataLoader
 
-from compute_confidences import compute_curvatures, compute_proximity_metrics
 import utils as u
 
 # Set random seeds for reproducibility
@@ -610,12 +608,12 @@ def compute_iou(adaptive_indices, full_indices):
 
 def main(dataset_name: str, model_type: str):
     # Define file paths for saving and loading cached results
-    full_accuracies_file = f"{u.HARD_IMBALANCE_DIR}full{dataset_name}_avg_class_accuracies_on_{model_type}ensemble.pkl"
-    part_accuracies_file = f"{u.HARD_IMBALANCE_DIR}part{dataset_name}_avg_class_accuracies_on_{model_type}ensemble.pkl"
-    full_proximity_file = f"{u.HARD_IMBALANCE_DIR}full{dataset_name}_proximity_indicators.pkl"
-    part_proximity_file = f"{u.HARD_IMBALANCE_DIR}part{dataset_name}_proximity_indicators.pkl"
-    full_curvature_file = f"{u.HARD_IMBALANCE_DIR}full{dataset_name}_curvature_indicators.pkl"
-    part_curvature_file = f"{u.HARD_IMBALANCE_DIR}part{dataset_name}_curvature_indicators.pkl"
+    full_accuracies_file = f"{u.METRICS_SAVE_DIR}full{dataset_name}_avg_class_accuracies_on_{model_type}ensemble.pkl"
+    part_accuracies_file = f"{u.METRICS_SAVE_DIR}part{dataset_name}_avg_class_accuracies_on_{model_type}ensemble.pkl"
+    full_proximity_file = f"{u.METRICS_SAVE_DIR}full{dataset_name}_proximity_indicators.pkl"
+    part_proximity_file = f"{u.METRICS_SAVE_DIR}part{dataset_name}_proximity_indicators.pkl"
+    full_curvature_file = f"{u.METRICS_SAVE_DIR}full{dataset_name}_curvature_indicators.pkl"
+    part_curvature_file = f"{u.METRICS_SAVE_DIR}part{dataset_name}_curvature_indicators.pkl"
     metric_abbreviations = [
         'SameCentroidDist', 'OtherCentroidDist', 'CentroidDistRatio', 'Same1NNDist', 'Other1NNDist', '1NNRatioDist',
         'AvgSame40NNDist', 'AvgOther40NNDist', 'AvgAll40NNDist', 'Avg40NNDistRatio', '40NNPercSame', '40NNPercOther',

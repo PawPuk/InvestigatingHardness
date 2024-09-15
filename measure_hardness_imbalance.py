@@ -17,8 +17,8 @@ class HardnessImbalanceMeasurer:
         self.dataset_name = dataset_name
         self.training = training
         self.model_type = model_type
-        self.easy_indices, self.hard_indices, _, _ = u.load_data(
-            f'{u.DIVISIONS_SAVE_DIR}/{training}{dataset_name}_indices.pkl')
+        _, _, self.easy_indices, self.hard_indices = u.load_data(
+            f'{u.DIVISIONS_SAVE_DIR}{training}{model_type}{dataset_name}_indices.pkl')
         self.models = []
         self.model_paths = self.get_all_trained_model_paths()
         # Load models from memory (similar to the logic in `EnsembleTrainer.train_ensemble`)
@@ -75,8 +75,7 @@ class HardnessImbalanceMeasurer:
         accuracy = correct / total if total > 0 else None  # Using None, as this should not occur.
         return accuracy
 
-    @staticmethod
-    def plot_error_rates(accuracies: List[dict], metric_abbreviations: List[str]) -> None:
+    def plot_error_rates(self, accuracies: List[dict], metric_abbreviations: List[str]) -> None:
         """Plot the error rates for all metrics in one figure, with vertical line segments for each error rate type."""
 
         num_metrics = len(accuracies)
@@ -121,34 +120,47 @@ class HardnessImbalanceMeasurer:
 
         # Show the plot
         plt.tight_layout()
-        plt.savefig('hardness_based_imbalances.pdf')
-        plt.savefig('hardness_based_imbalances.png')
+        plt.savefig(f'{u.HARD_IMBALANCE_DIR}{self.model_type}_{self.training}{self.dataset_name}_imbalances.pdf')
+        plt.savefig(f'{u.HARD_IMBALANCE_DIR}{self.model_type}_{self.training}{self.dataset_name}_imbalances.png')
         plt.show()
 
     def plot_consistency(self, easy_accuracies, hard_accuracies, metric_abbreviations: List[str], num_metrics):
         """Plot how easy and hard accuracies change as we increase the number of models for each metric."""
         fig, axes = plt.subplots(3, 5, figsize=(20, 12))
 
-        total_models = len(easy_accuracies)
+        total_models = min(len(easy_accuracies[0]), 500)  # Number of models should be the length of inner lists
+        assert len(easy_accuracies) == num_metrics, "Number of metrics should match the length of easy_accuracies"
 
-        # Compute running averages and standard deviations
-        running_avg_easy = np.array([np.mean(easy_accuracies[:i+1], axis=0) for i in range(total_models)])
-        running_std_easy = np.array([np.std(easy_accuracies[:i+1], axis=0) for i in range(total_models)])
-        running_avg_hard = np.array([np.mean(hard_accuracies[:i+1], axis=0) for i in range(total_models)])
-        running_std_hard = np.array([np.std(hard_accuracies[:i+1], axis=0) for i in range(total_models)])
+        # Initialize lists to store running averages and standard deviations for easy and hard accuracies
+        running_avg_easy = np.zeros((num_metrics, total_models))
+        running_std_easy = np.zeros((num_metrics, total_models))
+        running_avg_hard = np.zeros((num_metrics, total_models))
+        running_std_hard = np.zeros((num_metrics, total_models))
 
+        # Compute running averages and standard deviations across models for each metric
+        for i in range(total_models):
+            running_avg_easy[:, i] = np.mean(easy_accuracies[:, :i + 1], axis=1)
+            running_std_easy[:, i] = np.std(easy_accuracies[:, :i + 1], axis=1)
+            running_avg_hard[:, i] = np.mean(hard_accuracies[:, :i + 1], axis=1)
+            running_std_hard[:, i] = np.std(hard_accuracies[:, :i + 1], axis=1)
+
+        # Plotting the consistency for each metric
         for metric_idx in range(num_metrics):
             row, col = divmod(metric_idx, 5)  # Calculate row and column indices for the subplot
             ax = axes[row, col]
             x_vals = range(1, total_models + 1)
-            mean_easy = running_avg_easy[:, metric_idx]
-            std_easy = running_std_easy[:, metric_idx]
-            mean_hard = running_avg_hard[:, metric_idx]
-            std_hard = running_std_hard[:, metric_idx]
 
-            # Plot easy and hard accuracies
+            # Plot easy and hard accuracies for the metric
+            mean_easy = running_avg_easy[metric_idx, :]
+            std_easy = running_std_easy[metric_idx, :]
+            mean_hard = running_avg_hard[metric_idx, :]
+            std_hard = running_std_hard[metric_idx, :]
+
+            # Plot easy accuracies
             ax.plot(x_vals, mean_easy, label='Easy Accuracy', color='blue')
             ax.fill_between(x_vals, mean_easy - std_easy, mean_easy + std_easy, color='blue', alpha=0.3)
+
+            # Plot hard accuracies
             ax.plot(x_vals, mean_hard, label='Hard Accuracy', color='red')
             ax.fill_between(x_vals, mean_hard - std_hard, mean_hard + std_hard, color='red', alpha=0.3)
 
@@ -177,10 +189,14 @@ class HardnessImbalanceMeasurer:
 
             all_accuracies, easy_acc, hard_acc = [], [], []
 
-            for model in self.models:
+            for model in self.models[:50]:
                 all_accuracies.append(self.measure_imbalance_on_one_model(model, list(range(self.dataset_size))))
                 easy_acc.append(self.measure_imbalance_on_one_model(model, metric_easy_indices))
                 hard_acc.append(self.measure_imbalance_on_one_model(model, metric_hard_indices))
+
+            # Convert to numpy arrays to ensure proper shape and alignment
+            easy_acc = np.array(easy_acc)
+            hard_acc = np.array(hard_acc)
 
             easy_accuracies.append(easy_acc)
             hard_accuracies.append(hard_acc)
@@ -194,6 +210,13 @@ class HardnessImbalanceMeasurer:
                 'mean_acc_hard': np.mean(hard_acc),
                 'std_acc_hard': np.std(hard_acc)
             })
+
+        # Convert the lists to numpy arrays to ensure alignment across metrics
+        easy_accuracies = np.array(easy_accuracies)
+        hard_accuracies = np.array(hard_accuracies)
+
+        print(f"Shape of easy_accuracies: {easy_accuracies.shape}")
+        print(f"Shape of hard_accuracies: {hard_accuracies.shape}")
 
         # Plot error rates
         self.plot_error_rates(accuracies, metric_abbreviations)
