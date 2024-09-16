@@ -67,26 +67,25 @@ class EnsembleTrainer:
                 torch.save(model.state_dict(), f"{self.save_dir}{self.training}{self.dataset_name}"
                                                f"_{self.model_type}ensemble_{model_index}.pth",
                            _use_new_zipfile_serialization=False)  # Ensuring backward compatibility
-
-        # Collect all trained models
-        model_paths = self.get_all_trained_model_paths()
-        total_models = len(model_paths)
-        class_accuracies = np.zeros((total_models, num_classes))  # Store class-level accuracies for all models
-
-        # Evaluate all models
-        for idx, model_path in enumerate(model_paths):
-            model, _ = u.initialize_models(self.dataset_name, self.model_type)
-            model.load_state_dict(torch.load(model_path))
-            # Evaluate the model on the test set
-            class_accuracies[idx] = u.class_level_test(model, test_loader, num_classes)
-
-        # Save class accuracies
-        class_accuracies_file = f"{u.METRICS_SAVE_DIR}{self.training}{self.dataset_name}" \
-                                f"_avg_class_accuracies_on_{self.model_type}ensemble.pkl"
-        u.save_data(class_accuracies, class_accuracies_file)
-
-        # Measure the consistency of class bias (but only for untouched dataset; don't repeat for resampled case)
         if self.save_dir == u.MODEL_SAVE_DIR:
+            # Collect all trained models
+            model_paths = self.get_all_trained_model_paths()
+            total_models = len(model_paths)
+            class_accuracies = np.zeros((total_models, num_classes))  # Store class-level accuracies for all models
+
+            # Evaluate all models
+            for idx, model_path in enumerate(model_paths):
+                model, _ = u.initialize_models(self.dataset_name, self.model_type)
+                model.load_state_dict(torch.load(model_path))
+                # Evaluate the model on the test set
+                class_accuracies[idx] = u.class_level_test(model, test_loader, num_classes)
+
+            # Save class accuracies
+            class_accuracies_file = f"{u.METRICS_SAVE_DIR}{self.training}{self.dataset_name}" \
+                                    f"_avg_class_accuracies_on_{self.model_type}ensemble.pkl"
+            u.save_data(class_accuracies, class_accuracies_file)
+
+            # Measure the consistency of class bias (but only for untouched dataset; don't repeat for resampled case)
             running_avg_class_accuracies = np.array([class_accuracies[:i+1].mean(axis=0) for i in range(total_models)])
             running_std_class_accuracies = np.array([class_accuracies[:i+1].std(axis=0) for i in range(total_models)])
             self.plot_class_accuracies(running_avg_class_accuracies, running_std_class_accuracies, num_classes)

@@ -96,14 +96,14 @@ def load_and_prepare_data(model_type, dataset_name) -> List[Tuple[DataLoader, Da
 
             if change_in_size < 0:
                 print(
-                    f"Removed {-change_in_size} samples. The new dataset is {percentage_of_original:.2f}% of the "
+                    f"Removed {-change_in_size} samples. The new training set is {percentage_of_original:.2f}% of the "
                     f"original size (new size: {final_size_after}).")
             elif change_in_size > 0:
                 print(
-                    f"Added {change_in_size} samples. The new dataset is {percentage_of_original:.2f}% of the "
+                    f"Added {change_in_size} samples. The new training set is {percentage_of_original:.2f}% of the "
                     f"original size (new size: {final_size_after}).")
             else:
-                print(f"No change in the dataset size. It remains the same with {final_size_after} samples.")
+                print(f"No change in the training set size. It remains the same with {final_size_after} samples.")
             metric_datasets.append(combined_dataset)
         else:
             raise Exception('This should not happen.')
