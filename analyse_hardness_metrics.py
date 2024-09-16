@@ -29,14 +29,17 @@ def detect_family(normalized_metric: np.ndarray, avg_gradients: List[np.ndarray]
 
 def is_first_family_metric(avg_gradients: List[np.ndarray]) -> bool:
     """Check if the metric belongs to the first family."""
-    # Check if the rightmost points have the highest value
-    right_most = np.mean(avg_gradients[-1000:])
-    # Check if the leftmost points are higher than the mean of the middle samples
-    left_most = np.mean(avg_gradients[:1000])
-    middle_mean = np.mean(avg_gradients[len(avg_gradients) // 2 - 10000: len(avg_gradients) // 2 + 10000])
-
-    # Conditions: rightmost should be highest, leftmost should be higher than the middle mean
-    return right_most > 3 * middle_mean and left_most > 3 * middle_mean
+    # Check if the rightmost gradients are larger than the leftmost ones
+    condition1 = True if np.mean(avg_gradients[-100:]) > np.mean(avg_gradients[:100]) else False
+    # Check if the leftmost gradients are higher than average gradient
+    condition2 = True if np.mean(avg_gradients[:100]) > np.mean(avg_gradients) else False
+    # Check if the rightmost gradients are higher than average gradient
+    condition3 = True if np.mean(avg_gradients[-100:]) > np.mean(avg_gradients) else False
+    # Check if the leftmost gradients are higher than the threshold
+    threshold = 0.025 * np.max(avg_gradients)
+    condition4 = True if threshold < np.mean(avg_gradients[:100]) else False
+    print(condition1, condition2, condition3, condition4)
+    return condition1 and condition4
 
 
 def is_second_family_metric(normalized_metric: np.ndarray, avg_gradients: List[np.ndarray]) -> int:
@@ -53,55 +56,71 @@ def is_second_family_metric(normalized_metric: np.ndarray, avg_gradients: List[n
         return True
 
 
-def find_division_points_for_first_family(second_derivatives: np.ndarray, epsilon_fraction: float = 0.01,
-                                          window_size_1: int = 10000) -> Tuple[int, int]:
-    """Find the first and second division points based on the second derivative analysis."""
-    max_second_derivative = np.max(second_derivatives)
-    epsilon = epsilon_fraction * max_second_derivative
+def find_division_points_for_first_family(first_derivatives: np.ndarray, percentage: float = 2.5,
+                                          window_size: int = 10000) -> Tuple[int, int]:
+    """Find the first and second division points based on the second derivative analysis. U-shaped first derivative"""
+    max_value = np.max(first_derivatives)
+    min_value = 0 if np.min(first_derivatives) < max_value / 100 else np.min(first_derivatives)
+    values_range = max_value - min_value
+    left_threshold = min_value + (percentage / 100) * values_range
+    right_threshold = min_value + (percentage / 100) * values_range
+    first_division_point, second_division_point = None, None
 
-    # Initialize division points
-    first_division_point = None
-    second_division_point = None
-
-    # Find the second division point (from left to right)
-    for i in range(window_size_1, len(second_derivatives) - window_size_1):
-        if np.all(np.abs(second_derivatives[i:i + window_size_1]) < epsilon):
+    # Find the first division point (from left to right)
+    for i in range(0, len(first_derivatives) - window_size):
+        window = first_derivatives[i:i + window_size]
+        if np.all(window < left_threshold):
             first_division_point = i
             break
 
-    # Find the first division point (from right to left)
-    for i in range(len(second_derivatives) - 1, window_size_1 - 1, -1):
-        if np.all(np.abs(second_derivatives[i - window_size_1:i]) < epsilon):
+    # Find the second division point (from right to left)
+    for i in range(len(first_derivatives) - 1, window_size, -1):
+        window = first_derivatives[i - window_size: i]
+        if np.all(window < right_threshold):
             second_division_point = i
             break
-
-    return first_division_point, second_division_point
-
-
-def find_division_points_for_second_family(first_derivatives: np.ndarray, window_size: int = 500,
-                                           epsilon_fraction: float = 0.01) -> Tuple[int, int]:
-    right_most_value = np.mean(first_derivatives[-window_size:])
-    epsilon = epsilon_fraction * right_most_value
-
-    # Start from the rightmost point and move left
-    for i in range(len(first_derivatives) - window_size, 0, -1):
-        window_mean = np.mean(first_derivatives[i:i + window_size])
-        if abs(window_mean - right_most_value) > epsilon:
-            return i + 500, i + 500  # Move the point slightly to the right
-    return 0, 0
+    if first_division_point is None or second_division_point is None:
+        print()
+        print(first_division_point, second_division_point)
+        print(left_threshold, right_threshold)
+        print(max_value)
+        raise Exception
+    return max(first_division_point, 1000), min(second_division_point, len(first_derivatives) - 1000)
 
 
-def find_division_points_for_third_family(second_derivatives: np.ndarray, window_size1: int = 20000,
-                                          window_size2: int = 500, epsilon_factor: float = 250) -> Tuple[int, int]:
-    left_most_value = np.mean(second_derivatives[:window_size1])
-    epsilon = epsilon_factor * left_most_value
-    print(left_most_value)
-    # Start from the rightmost point and move left
-    for i in range(len(second_derivatives) - window_size2):
-        window_mean = np.mean(second_derivatives[i:i + window_size2])
-        if abs(window_mean - left_most_value) > epsilon:
-            return i + 500, i + 500  # Move the point slightly to the right
-    return 0, 0
+def find_division_points_for_second_family(first_derivatives: np.ndarray, window_size: int = 100,
+                                           percentage: float = 2.5) -> Tuple[int, int]:
+    max_value = np.max(first_derivatives[-window_size:])
+    min_value = 0 if np.min(first_derivatives) < max_value / 100 else np.min(first_derivatives)
+    values_range = max_value - min_value
+    threshold_value = min_value + ((100 - percentage) / 100) * values_range
+    for i in range(len(first_derivatives) - 1, window_size, -1):
+        window = first_derivatives[i - window_size: i]
+        if np.all(window < threshold_value):
+            return i, i
+    print('b' * 25)
+    return 1000, 1000
+
+
+def find_division_points_for_third_family(first_derivatives: np.ndarray, window_size: int = 100,
+                                          percentage: float = 2.5) -> Tuple[int, int]:
+
+    if np.mean(first_derivatives[:100]) == 0:
+        start_index = 0  # Start from zero if the first 500 derivatives are zero
+    else:
+        start_index = 20000  # Otherwise, start from 20000
+
+    max_value = np.max(first_derivatives[-window_size:])
+    min_value = 0 if np.min(first_derivatives) < max_value / 100 else np.min(first_derivatives)
+    values_range = max_value - min_value
+    threshold_value = min_value + (percentage / 100) * values_range
+
+    for i in range(start_index, len(first_derivatives) - window_size + 1):
+        window = first_derivatives[i:i + window_size]
+        if np.all(window > threshold_value):
+            return i, i
+    print(start_index, 'c' * 25)
+    return len(first_derivatives) - 1000, len(first_derivatives) - 1000
 
 
 def plot_metric_results(metric_idx: int, sorted_normalized_metric: np.ndarray, avg_gradients: List[np.ndarray],
@@ -153,7 +172,6 @@ def plot_metric_results(metric_idx: int, sorted_normalized_metric: np.ndarray, a
     axes[0].set_xlabel('Sample Index (Sorted)')
     axes[0].set_ylabel('Normalized Metric Value')
     axes[0].grid(True)
-
     # Plot average gradient
     axes[1].plot(avg_gradients, marker='x', linestyle='-', color='r')
     if first_division_point is not None:
@@ -213,7 +231,7 @@ def extract_extreme_samples_threshold(metrics: List[List[float]], labels: List[i
         num_samples = len(selected_metric)
         hard_threshold_count = int(hard_threshold_percent * num_samples)
 
-        # Replace inf values with the maximum finite value
+        # Replace inf values with twice the maximum finite value
         max_finite_value = np.max(selected_metric[np.isfinite(selected_metric)])
         selected_metric[np.isinf(selected_metric)] = max_finite_value * 2
 
@@ -248,11 +266,11 @@ def extract_extreme_samples_threshold(metrics: List[List[float]], labels: List[i
         family = detect_family(sorted_normalized_metric, avg_gradients)
         print(f'Metric {metric_idx + 1} is of family {family}.')
         if family == 1:
-            first_division_point, second_division_point = find_division_points_for_first_family(second_derivatives)
+            first_division_point, second_division_point = find_division_points_for_first_family(np.array(avg_gradients))
         elif family == 2:
             first_division_point, second_division_point = find_division_points_for_second_family(smoothed_avg_gradients)
         elif family == 3:
-            first_division_point, second_division_point = find_division_points_for_third_family(second_derivatives)
+            first_division_point, second_division_point = find_division_points_for_third_family(np.array(avg_gradients))
 
         # Dictionaries to hold the distribution of easy and hard samples per class
         adaptive_easy_dist = defaultdict(int)
@@ -674,7 +692,7 @@ def main(dataset_name: str, model_type: str):
                                             f'{training}{model_type}{dataset_name}_avgSRC.pdf')
 
     # Measure the ratio of easy:hard samples in the training and test splits proposed by PyTorch
-    compute_easy_hard_ratios(dataset_name, full_indices[2], full_indices[3])
+    compute_easy_hard_ratios(dataset_name, full_indices[0], full_indices[1])
 
     iou_values_easy = []
     iou_values_hard = []
@@ -685,30 +703,30 @@ def main(dataset_name: str, model_type: str):
     # TODO: Modify the below to work with fixes, and change the threshold for fixed to 10%
     for metric_idx, (adaptive_easy, adaptive_hard) in enumerate(zip(part_indices[2], part_indices[3])):
         # Compute IoU
-        easy_iou = compute_iou(adaptive_easy, full_indices[2][metric_idx])
-        hard_iou = compute_iou(adaptive_hard, full_indices[3][metric_idx])
+        easy_iou = compute_iou(adaptive_easy, full_indices[0][metric_idx])
+        hard_iou = compute_iou(adaptive_hard, full_indices[1][metric_idx])
         iou_values_easy.append(easy_iou)
         iou_values_hard.append(hard_iou)
 
         # Adjust the easy and hard indices obtained via full and part setting to have the same length
-        if len(adaptive_easy) > len(full_indices[2][metric_idx]):
-            adaptive_easy = adaptive_easy[:len(full_indices[2][metric_idx])]
+        if len(adaptive_easy) > len(full_indices[0][metric_idx]):
+            adaptive_easy = adaptive_easy[:len(full_indices[0][metric_idx])]
         else:
-            full_indices[2][metric_idx] = full_indices[2][metric_idx][:len(adaptive_easy)]
-        if len(adaptive_hard) > len(full_indices[3][metric_idx]):
-            adaptive_hard = adaptive_hard[-len(full_indices[3][metric_idx]):]
+            full_indices[0][metric_idx] = full_indices[0][metric_idx][:len(adaptive_easy)]
+        if len(adaptive_hard) > len(full_indices[1][metric_idx]):
+            adaptive_hard = adaptive_hard[-len(full_indices[1][metric_idx]):]
         else:
-            full_indices[3][metric_idx] = full_indices[3][metric_idx][-len(adaptive_hard):]
+            full_indices[1][metric_idx] = full_indices[1][metric_idx][-len(adaptive_hard):]
 
         # Compute Spearman's
-        easy_spearman, _ = spearmanr(adaptive_easy, full_indices[2][metric_idx])
-        hard_spearman, _ = spearmanr(adaptive_hard, full_indices[3][metric_idx])
+        easy_spearman, _ = spearmanr(adaptive_easy, full_indices[0][metric_idx])
+        hard_spearman, _ = spearmanr(adaptive_hard, full_indices[1][metric_idx])
         spearman_values_easy.append(easy_spearman)
         spearman_values_hard.append(hard_spearman)
 
         # Compute Kendall's Tau
-        easy_kendall, _ = kendalltau(adaptive_easy, full_indices[2][metric_idx])
-        hard_kendall, _ = kendalltau(adaptive_hard, full_indices[3][metric_idx])
+        easy_kendall, _ = kendalltau(adaptive_easy, full_indices[0][metric_idx])
+        hard_kendall, _ = kendalltau(adaptive_hard, full_indices[1][metric_idx])
         kendall_values_easy.append(easy_kendall)
         kendall_values_hard.append(hard_kendall)
         # TODO: add p-values and incorporate them into the plot
