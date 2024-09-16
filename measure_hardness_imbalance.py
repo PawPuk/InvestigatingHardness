@@ -1,6 +1,7 @@
 import argparse
 from glob import glob
-from typing import List
+import os
+from typing import List, Tuple
 
 from matplotlib.lines import Line2D
 import matplotlib.pyplot as plt
@@ -17,8 +18,6 @@ class HardnessImbalanceMeasurer:
         self.dataset_name = dataset_name
         self.training = training
         self.model_type = model_type
-        _, _, self.easy_indices, self.hard_indices = u.load_data(
-            f'{u.DIVISIONS_SAVE_DIR}{training}{model_type}{dataset_name}_indices.pkl')
         self.models = []
         self.model_paths = self.get_all_trained_model_paths()
         # Load models from memory (similar to the logic in `EnsembleTrainer.train_ensemble`)
@@ -34,7 +33,34 @@ class HardnessImbalanceMeasurer:
             training_dataset, test_dataset = u.load_data_and_normalize(self.dataset_name)
             self.dataset_size = len(training_dataset) + len(test_dataset)
             self.test_size = len(test_dataset)
+            self.training_size = len(training_dataset)
         self.loader = DataLoader(test_dataset, batch_size=len(test_dataset), shuffle=False)
+        self.easy_indices, self.medium_indices, self.hard_indices = self.categorize_indices_by_hardness()
+
+    def categorize_indices_by_hardness(self) -> Tuple[List[set], List[set], List[set]]:
+        _, _, easy_indices, hard_indices = u.load_data(
+            f'{u.DIVISIONS_SAVE_DIR}full{self.model_type}{self.dataset_name}_indices.pkl')
+        easy_test_indices, medium_test_indices, hard_test_indices = [], [], []
+        for metric_idx in range(len(easy_indices)):
+            metric_easy_indices = easy_indices[metric_idx]
+            metric_hard_indices = hard_indices[metric_idx]
+            if self.training == 'full':
+                metric_medium_indices = set(range(self.dataset_size)).difference(
+                    set(metric_easy_indices).union(set(metric_hard_indices)))
+                easy_test_indices.append(set(metric_easy_indices))
+                medium_test_indices.append(metric_medium_indices)
+                hard_test_indices.append(set(metric_hard_indices))
+            else:
+                part_easy_indices = set(range(self.training_size, self.dataset_size)).intersection(
+                    set(metric_easy_indices))
+                part_hard_indices = set(range(self.training_size, self.dataset_size)).intersection(
+                    set(metric_hard_indices))
+                part_medium_indices = set(range(self.dataset_size)).difference(
+                    set(part_easy_indices).union(set(part_hard_indices)))
+                easy_test_indices.append(part_easy_indices)
+                medium_test_indices.append(part_medium_indices)
+                hard_test_indices.append(part_hard_indices)
+        return easy_test_indices, medium_test_indices, hard_test_indices
 
     def get_all_trained_model_paths(self):
         """Retrieve all trained model paths matching current dataset, training, and model type."""
@@ -42,16 +68,20 @@ class HardnessImbalanceMeasurer:
         model_paths = glob(pattern)
         return sorted(model_paths)
 
-    def measure_imbalance_on_one_model(self, model: torch.nn.Module, extreme_indices: List[int]) -> float:
+    def measure_imbalance_on_one_model(self, model: torch.nn.Module, extreme_indices: set) -> float:
         """Test a single model on a specific set of samples (given by indices) and return accuracy."""
+        if len(extreme_indices) == 0 or \
+                (self.training == 'part' and max(extreme_indices) < (self.dataset_size - self.test_size)):
+            return -1.0
+
         model.eval()
         all_outputs, all_targets = [], []
 
         if self.training == 'full':
             test_indices = extreme_indices
         else:  # Filter indices to match only test samples (last portion of the dataset)
-            test_start_idx = self.dataset_size - self.test_size
-            test_indices = [i - test_start_idx for i in extreme_indices if test_start_idx <= i < self.dataset_size]
+            test_indices = {i - self.training_size for i in extreme_indices if
+                            self.training_size <= i < self.dataset_size}
 
         with torch.no_grad():
             for data, target in self.loader:
@@ -64,8 +94,8 @@ class HardnessImbalanceMeasurer:
         all_targets = np.concatenate(all_targets)
 
         if len(test_indices) > 0:
-            selected_outputs = all_outputs[test_indices]
-            selected_targets = all_targets[test_indices]
+            selected_outputs = all_outputs[list(test_indices)]
+            selected_targets = all_targets[list(test_indices)]
         else:
             raise Exception('No valid test indices found.')
 
@@ -93,17 +123,25 @@ class HardnessImbalanceMeasurer:
             # Compute error rates (since error rate = 100% - accuracy)
             error_all = 1 - acc['mean_acc_all']
             error_easy = 1 - acc['mean_acc_easy']
+            error_medium = 1 - acc['mean_acc_medium']
             error_hard = 1 - acc['mean_acc_hard']
 
-            max_error_rate = max(max_error_rate, error_all, error_easy, error_hard)
-
-            # Plot vertical line segments using Line2D for all, easy, and hard samples
-            ax.add_line(Line2D([i - epsilon, i + epsilon], [error_easy, error_easy],
-                               color='green', linewidth=5))  # Green for easy
-            ax.add_line(Line2D([i - epsilon, i + epsilon], [error_all, error_all],
-                               color='black', linewidth=5))  # Black for all
-            ax.add_line(Line2D([i - epsilon, i + epsilon], [error_hard, error_hard],
-                               color='red', linewidth=5))  # Red for hard
+            errors = [error_all, error_easy, error_medium, error_hard]
+            current_max = max(errors) if max(errors) != 2 else sorted(errors, reverse=True)[1]
+            max_error_rate = max(max_error_rate, current_max)
+            if error_all != 2:
+                # Plot vertical line segments using Line2D for all, easy, and hard samples
+                ax.add_line(Line2D([i - epsilon, i + epsilon], [error_all, error_all],
+                                   color='black', linewidth=5))  # Black for all
+            if error_easy != 2:
+                ax.add_line(Line2D([i - epsilon, i + epsilon], [error_easy, error_easy],
+                                   color='green', linewidth=5))  # Green for easy
+            if error_medium != 2:
+                ax.add_line(Line2D([i - epsilon, i + epsilon], [error_medium, error_medium],
+                                   color='blue', linewidth=5))  # Blue for medium
+            if error_hard:
+                ax.add_line(Line2D([i - epsilon, i + epsilon], [error_hard, error_hard],
+                                   color='red', linewidth=5))  # Red for hard
 
         # Calculate ylim based on the max error rate with an epsilon margin (10% of max error rate)
         epsilon_y = 0.1 * max_error_rate
@@ -116,7 +154,7 @@ class HardnessImbalanceMeasurer:
         ax.set_title('Error Rates across Different Metrics')
         ax.grid(True)
         plt.xticks(rotation=45, ha='right')  # Rotate x-tick labels
-        ax.set_xlim(0.5, num_metrics + 0.5)  # Padding added to the left and right
+        ax.set_xlim(-0.5, num_metrics - 0.5)  # Padding added to the left and right
 
         # Show the plot
         plt.tight_layout()
@@ -124,7 +162,8 @@ class HardnessImbalanceMeasurer:
         plt.savefig(f'{u.HARD_IMBALANCE_DIR}{self.model_type}_{self.training}{self.dataset_name}_imbalances.png')
         plt.show()
 
-    def plot_consistency(self, easy_accuracies, hard_accuracies, metric_abbreviations: List[str], num_metrics):
+    def plot_consistency(self, easy_accuracies, medium_accuracies, hard_accuracies, metric_abbreviations: List[str],
+                         num_metrics: int):
         """Plot how easy and hard accuracies change as we increase the number of models for each metric."""
         fig, axes = plt.subplots(3, 5, figsize=(20, 12))
 
@@ -134,6 +173,8 @@ class HardnessImbalanceMeasurer:
         # Initialize lists to store running averages and standard deviations for easy and hard accuracies
         running_avg_easy = np.zeros((num_metrics, total_models))
         running_std_easy = np.zeros((num_metrics, total_models))
+        running_avg_medium = np.zeros((num_metrics, total_models))
+        running_std_medium = np.zeros((num_metrics, total_models))
         running_avg_hard = np.zeros((num_metrics, total_models))
         running_std_hard = np.zeros((num_metrics, total_models))
 
@@ -141,6 +182,8 @@ class HardnessImbalanceMeasurer:
         for i in range(total_models):
             running_avg_easy[:, i] = np.mean(easy_accuracies[:, :i + 1], axis=1)
             running_std_easy[:, i] = np.std(easy_accuracies[:, :i + 1], axis=1)
+            running_avg_medium[:, i] = np.mean(medium_accuracies[:, :i + 1], axis=1)
+            running_std_medium[:, i] = np.std(medium_accuracies[:, :i + 1], axis=1)
             running_avg_hard[:, i] = np.mean(hard_accuracies[:, :i + 1], axis=1)
             running_std_hard[:, i] = np.std(hard_accuracies[:, :i + 1], axis=1)
 
@@ -153,16 +196,21 @@ class HardnessImbalanceMeasurer:
             # Plot easy and hard accuracies for the metric
             mean_easy = running_avg_easy[metric_idx, :]
             std_easy = running_std_easy[metric_idx, :]
+            mean_medium = running_avg_medium[metric_idx, :]
+            std_medium = running_std_medium[metric_idx, :]
             mean_hard = running_avg_hard[metric_idx, :]
             std_hard = running_std_hard[metric_idx, :]
 
-            # Plot easy accuracies
-            ax.plot(x_vals, mean_easy, label='Easy Accuracy', color='blue')
-            ax.fill_between(x_vals, mean_easy - std_easy, mean_easy + std_easy, color='blue', alpha=0.3)
-
-            # Plot hard accuracies
-            ax.plot(x_vals, mean_hard, label='Hard Accuracy', color='red')
-            ax.fill_between(x_vals, mean_hard - std_hard, mean_hard + std_hard, color='red', alpha=0.3)
+            # Plot the accuracies if the samples of the given hardness type exist in the test set
+            if -1 not in mean_easy:
+                ax.plot(x_vals, mean_easy, label='Easy Accuracy', color='green')
+                ax.fill_between(x_vals, mean_easy - std_easy, mean_easy + std_easy, color='green', alpha=0.3)
+            if -1 not in mean_medium:
+                ax.plot(x_vals, mean_medium, label='Medium Accuracy', color='blue')
+                ax.fill_between(x_vals, mean_medium - std_medium, mean_medium + std_medium, color='blue', alpha=0.3)
+            if -1 not in mean_hard:
+                ax.plot(x_vals, mean_hard, label='Hard Accuracy', color='red')
+                ax.fill_between(x_vals, mean_hard - std_hard, mean_hard + std_hard, color='red', alpha=0.3)
 
             ax.set_title(f'Metric {metric_abbreviations[metric_idx]}')
             ax.set_xlabel('Number of Models')
@@ -176,53 +224,52 @@ class HardnessImbalanceMeasurer:
 
     def measure_and_visualize_hardness_based_imbalance(self):
         """Test an ensemble of models on the dataset, returning accuracies for each metric."""
-        accuracies, easy_accuracies, hard_accuracies = [], [], []
+        accuracies, easy_accuracies, medium_accuracies, hard_accuracies = [], [], [], []
         metric_abbreviations = [
             'SameCentroidDist', 'OtherCentroidDist', 'CentroidDistRatio', 'Same1NNDist', 'Other1NNDist', '1NNRatioDist',
             'AvgSame40NNDist', 'AvgOther40NNDist', 'AvgAll40NNDist', 'Avg40NNDistRatio', '40NNPercSame',
             '40NNPercOther', 'N3', 'GaussCurv', 'MeanCurv'
         ]
+        accuracies_file = f'{u.ACCURACIES_SAVE_DIR}{self.model_type}_{self.training}{self.dataset_name}_accuracies.pkl'
 
-        for metric_idx in tqdm(range(len(self.easy_indices)), desc='Iterating through metrics'):
-            metric_easy_indices = self.easy_indices[metric_idx]
-            metric_hard_indices = self.hard_indices[metric_idx]
+        if os.path.exists(accuracies_file):
+            accuracies, easy_accuracies, medium_accuracies, hard_accuracies = u.load_data(accuracies_file)
+        else:
+            for metric_idx in tqdm(range(len(self.easy_indices)), desc='Iterating through metrics'):
+                metric_easy_indices = self.easy_indices[metric_idx]
+                metric_medium_indices = self.medium_indices[metric_idx]
+                metric_hard_indices = self.hard_indices[metric_idx]
+                all_accuracies, easy_acc, medium_acc, hard_acc = [], [], [], []
 
-            all_accuracies, easy_acc, hard_acc = [], [], []
+                for model in self.models[:50]:
+                    all_accuracies.append(self.measure_imbalance_on_one_model(model, set(range(self.dataset_size))))
+                    easy_acc.append(self.measure_imbalance_on_one_model(model, metric_easy_indices))
+                    medium_acc.append(self.measure_imbalance_on_one_model(model, metric_medium_indices))
+                    hard_acc.append(self.measure_imbalance_on_one_model(model, metric_hard_indices))
+                # Convert to numpy arrays to ensure proper shape and alignment
+                easy_acc, medium_acc, hard_acc = np.array(easy_acc), np.array(medium_acc), np.array(hard_acc)
 
-            for model in self.models[:50]:
-                all_accuracies.append(self.measure_imbalance_on_one_model(model, list(range(self.dataset_size))))
-                easy_acc.append(self.measure_imbalance_on_one_model(model, metric_easy_indices))
-                hard_acc.append(self.measure_imbalance_on_one_model(model, metric_hard_indices))
+                easy_accuracies.append(easy_acc)
+                medium_accuracies.append(medium_acc)
+                hard_accuracies.append(hard_acc)
+                accuracies.append({
+                    'metric': metric_idx,
+                    'mean_acc_all': np.mean(all_accuracies),
+                    'mean_acc_easy': np.mean(easy_acc),
+                    'mean_acc_medium': np.mean(medium_acc),
+                    'mean_acc_hard': np.mean(hard_acc),
+                })
 
-            # Convert to numpy arrays to ensure proper shape and alignment
-            easy_acc = np.array(easy_acc)
-            hard_acc = np.array(hard_acc)
+            # Convert the lists to numpy arrays to ensure alignment across metrics
+            easy_accuracies = np.array(easy_accuracies)
+            medium_accuracies = np.array(medium_accuracies)
+            hard_accuracies = np.array(hard_accuracies)
 
-            easy_accuracies.append(easy_acc)
-            hard_accuracies.append(hard_acc)
+            u.save_data((accuracies, easy_accuracies, medium_accuracies, hard_accuracies), accuracies_file)
 
-            accuracies.append({
-                'metric': metric_idx,
-                'mean_acc_all': np.mean(all_accuracies),
-                'std_acc_all': np.std(all_accuracies),
-                'mean_acc_easy': np.mean(easy_acc),
-                'std_acc_easy': np.std(easy_acc),
-                'mean_acc_hard': np.mean(hard_acc),
-                'std_acc_hard': np.std(hard_acc)
-            })
-
-        # Convert the lists to numpy arrays to ensure alignment across metrics
-        easy_accuracies = np.array(easy_accuracies)
-        hard_accuracies = np.array(hard_accuracies)
-
-        print(f"Shape of easy_accuracies: {easy_accuracies.shape}")
-        print(f"Shape of hard_accuracies: {hard_accuracies.shape}")
-
-        # Plot error rates
         self.plot_error_rates(accuracies, metric_abbreviations)
-
-        # Plot consistency
-        self.plot_consistency(easy_accuracies, hard_accuracies, metric_abbreviations, len(self.easy_indices))
+        self.plot_consistency(easy_accuracies, medium_accuracies, hard_accuracies, metric_abbreviations,
+                              len(self.easy_indices))
 
 
 if __name__ == "__main__":

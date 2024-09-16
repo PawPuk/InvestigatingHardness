@@ -17,12 +17,14 @@ if torch.cuda.is_available():
 
 
 class EnsembleTrainer:
-    def __init__(self, dataset_name: str, models_count: int, save: bool, training: str, model_type: str):
+    def __init__(self, dataset_name: str, models_count: int, save: bool, training: str, model_type: str,
+                 save_dir: str = u.MODEL_SAVE_DIR):
         self.dataset_name = dataset_name
         self.models_count = models_count
         self.save = save
         self.training = training
         self.model_type = model_type
+        self.save_dir = save_dir
 
     def get_next_model_index(self):
         """Determine the next available model index for saving new models."""
@@ -62,7 +64,7 @@ class EnsembleTrainer:
             # Save model state
             if self.save:
                 model_index = start_index + i
-                torch.save(model.state_dict(), f"{u.MODEL_SAVE_DIR}{self.training}{self.dataset_name}"
+                torch.save(model.state_dict(), f"{self.save_dir}{self.training}{self.dataset_name}"
                                                f"_{self.model_type}ensemble_{model_index}.pth",
                            _use_new_zipfile_serialization=False)  # Ensuring backward compatibility
 
@@ -83,10 +85,11 @@ class EnsembleTrainer:
                                 f"_avg_class_accuracies_on_{self.model_type}ensemble.pkl"
         u.save_data(class_accuracies, class_accuracies_file)
 
-        # Measure the consistency of class bias
-        running_avg_class_accuracies = np.array([class_accuracies[:i+1].mean(axis=0) for i in range(total_models)])
-        running_std_class_accuracies = np.array([class_accuracies[:i+1].std(axis=0) for i in range(total_models)])
-        self.plot_class_accuracies(running_avg_class_accuracies, running_std_class_accuracies, num_classes)
+        # Measure the consistency of class bias (but only for untouched dataset; don't repeat for resampled case)
+        if self.save_dir == u.MODEL_SAVE_DIR:
+            running_avg_class_accuracies = np.array([class_accuracies[:i+1].mean(axis=0) for i in range(total_models)])
+            running_std_class_accuracies = np.array([class_accuracies[:i+1].std(axis=0) for i in range(total_models)])
+            self.plot_class_accuracies(running_avg_class_accuracies, running_std_class_accuracies, num_classes)
 
     def plot_class_accuracies(self, running_avg_class_accuracies, running_std_class_accuracies, num_classes):
         """Plot how the average accuracy of each class changes as we increase the number of models."""

@@ -18,6 +18,7 @@ EPOCHS = 10
 BATCH_SIZE = 32
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 CRITERION = torch.nn.CrossEntropyLoss()
+ACCURACIES_SAVE_DIR = 'accuracies/'
 HARD_IMBALANCE_DIR = 'hardnessImbalance/'
 CONFIDENCES_SAVE_DIR = "confidences/"
 METRICS_SAVE_DIR = 'metrics/'
@@ -27,8 +28,10 @@ DIVISIONS_SAVE_DIR = 'dataset_divisions/'
 CORRELATIONS_SAVE_DIR = 'correlations/'
 CLASS_BIAS_SAVE_DIR = 'class_bias/'
 CONSISTENCY_SAVE_DIR = 'consistencies/'
+RESAMPLED_SAVE_DIR = 'resampled_models/'
 for directory in [HARD_IMBALANCE_DIR, CONFIDENCES_SAVE_DIR, DATA_SAVE_DIR, MODEL_SAVE_DIR, METRICS_SAVE_DIR,
-                  DIVISIONS_SAVE_DIR, CORRELATIONS_SAVE_DIR, CLASS_BIAS_SAVE_DIR, CONSISTENCY_SAVE_DIR]:
+                  DIVISIONS_SAVE_DIR, CORRELATIONS_SAVE_DIR, CLASS_BIAS_SAVE_DIR, CONSISTENCY_SAVE_DIR,
+                  ACCURACIES_SAVE_DIR, RESAMPLED_SAVE_DIR]:
     os.makedirs(directory, exist_ok=True)
 
 

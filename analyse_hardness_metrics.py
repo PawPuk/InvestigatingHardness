@@ -516,7 +516,7 @@ def compute_easy_hard_ratios(dataset_name: str, easy_indices: List[np.ndarray], 
 
     # Extract indices of the training and test sets
     train_indices = list(range(len(train_targets)))
-    test_indices = list(range(len(test_targets)))
+    test_indices = list(range(len(train_targets), len(train_targets) + len(test_targets)))
 
     # Initialize lists to store the data for the table
     metrics_data = []
