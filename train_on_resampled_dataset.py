@@ -1,8 +1,10 @@
 import argparse
+import os
 from typing import List, Tuple
 
 import torch
-from torch.utils.data import ConcatDataset, DataLoader, TensorDataset
+from torch.utils.data import DataLoader, TensorDataset
+from tqdm import tqdm
 
 import utils as u
 from imbalance_measures import ImbalanceMeasures
@@ -85,28 +87,35 @@ def load_and_prepare_data(model_type, dataset_name) -> List[Tuple[DataLoader, Da
 
         apply_resampling_techniques(tensor_datasets)
 
-        # Merge the easy, medium, and hard datasets into a single TensorDataset
-        final_datasets = list(tensor_datasets.values())
-        if final_datasets:
-            combined_dataset = torch.utils.data.ConcatDataset(final_datasets)
-            final_size_before = len(training_dataset)
-            final_size_after = len(combined_dataset)
-            change_in_size = final_size_after - final_size_before
-            percentage_of_original = (final_size_after / final_size_before) * 100
+        # Now combine the tensors from all categories (easy, medium, hard) into one TensorDataset
+        combined_data, combined_targets = [], []
 
-            if change_in_size < 0:
-                print(
-                    f"Removed {-change_in_size} samples. The new training set is {percentage_of_original:.2f}% of the "
-                    f"original size (new size: {final_size_after}).")
-            elif change_in_size > 0:
-                print(
-                    f"Added {change_in_size} samples. The new training set is {percentage_of_original:.2f}% of the "
-                    f"original size (new size: {final_size_after}).")
-            else:
-                print(f"No change in the training set size. It remains the same with {final_size_after} samples.")
-            metric_datasets.append(combined_dataset)
+        for dataset in tensor_datasets.values():
+            combined_data.append(dataset.tensors[0])
+            combined_targets.append(dataset.tensors[1])
+
+        # Concatenate the tensors to create a single TensorDataset
+        final_data = torch.cat(combined_data, dim=0)
+        final_targets = torch.cat(combined_targets, dim=0)
+        combined_dataset = TensorDataset(final_data, final_targets)
+
+        # Check the size difference and print the adaptive message
+        final_size_before = len(training_dataset)
+        final_size_after = len(combined_dataset)
+        change_in_size = final_size_after - final_size_before
+        percentage_of_original = (final_size_after / final_size_before) * 100
+
+        if change_in_size < 0:
+            print(
+                f"Removed {-change_in_size} samples. The new training set is {percentage_of_original:.2f}% of the "
+                f"original size (new size: {final_size_after}).")
+        elif change_in_size > 0:
+            print(
+                f"Added {change_in_size} samples. The new training set is {percentage_of_original:.2f}% of the "
+                f"original size (new size: {final_size_after}).")
         else:
-            raise Exception('This should not happen.')
+            print(f"No change in the training set size. It remains the same with {final_size_after} samples.")
+        metric_datasets.append(combined_dataset)
 
     return [(DataLoader(dataset, batch_size=32, shuffle=True),
              DataLoader(test_dataset, batch_size=len(test_dataset), shuffle=True)) for dataset in metric_datasets]
@@ -114,8 +123,10 @@ def load_and_prepare_data(model_type, dataset_name) -> List[Tuple[DataLoader, Da
 
 def main(dataset_name: str, models_count: int, model_type: str):
     dataloaders = load_and_prepare_data(model_type, dataset_name)
-    for metric_idx, (training_loader, test_loader) in enumerate(dataloaders):
-        trainer = EnsembleTrainer(dataset_name, models_count, True, 'part', model_type, u.RESAMPLED_SAVE_DIR)
+    for metric_idx, (training_loader, test_loader) in tqdm(enumerate(dataloaders)):
+        save_dir = f'{u.RESAMPLED_SAVE_DIR}/metric{metric_idx}/'
+        os.makedirs(save_dir, exist_ok=True)
+        trainer = EnsembleTrainer(dataset_name, models_count, True, 'part', model_type, save_dir)
         trainer.train_ensemble(training_loader, test_loader)
 
 
