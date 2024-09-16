@@ -38,7 +38,7 @@ class HardnessImbalanceMeasurer:
         self.easy_indices, self.medium_indices, self.hard_indices = self.categorize_indices_by_hardness()
 
     def categorize_indices_by_hardness(self) -> Tuple[List[set], List[set], List[set]]:
-        _, _, easy_indices, hard_indices = u.load_data(
+        easy_indices, hard_indices, _, _ = u.load_data(
             f'{u.DIVISIONS_SAVE_DIR}full{self.model_type}{self.dataset_name}_indices.pkl')
         easy_test_indices, medium_test_indices, hard_test_indices = [], [], []
         for metric_idx in range(len(easy_indices)):

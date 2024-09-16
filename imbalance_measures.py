@@ -17,12 +17,14 @@ class ImbalanceMeasures:
 
     def random_oversampling(self, multiplication_factor: float) -> TensorDataset:
         hard_features, hard_labels = self.hard_data.tensors
+        multiplication_factor = max(1.0, multiplication_factor)
         new_size = int(len(self.hard_data) * multiplication_factor)
         indices = np.random.choice(len(hard_features), size=new_size, replace=True)
         return TensorDataset(hard_features[indices], hard_labels[indices])
 
     def random_undersampling(self, removal_ratio: float) -> TensorDataset:
         easy_features, easy_labels = self.easy_data.tensors
+        removal_ratio = min(1.0, removal_ratio)
         new_size = int(len(self.easy_data) * (1 - removal_ratio))
         indices = np.random.choice(len(easy_features), size=new_size, replace=False)
         return TensorDataset(easy_features[indices], easy_labels[indices])

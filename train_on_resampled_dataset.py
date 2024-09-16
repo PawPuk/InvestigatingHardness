@@ -11,12 +11,29 @@ from imbalance_measures import ImbalanceMeasures
 from train_ensembles import EnsembleTrainer
 
 
-def apply_resampling_techniques(tensor_datasets):
+def apply_resampling_techniques(tensor_datasets, dataset_size):
+    # If the size of tensor_dataset (percentage of dataset_size) is lower than this number than apply strict rules
+    string_oversampling_threshold = 0.1
+    strict_undersampling_threshold = 0.25
+    strict_addition_ratio = 2.0
+    lenient_addition_ratio = 1.0
+    strict_removal_ratio = 1.0
+    lenient_removal_ratio = 0.5
+
     if 'hard' in tensor_datasets:
         hard_dataset = tensor_datasets['hard']
         hard_size_before = len(hard_dataset)
         IM = ImbalanceMeasures(None, hard_dataset)
-        hard_dataset_resampled = IM.random_oversampling(2.0)  # Increase hard samples two-fold
+
+        if len(hard_dataset) < string_oversampling_threshold * dataset_size:
+            hard_dataset_resampled = IM.random_oversampling(2.0)  # Increase hard samples two-fold
+        else:
+            hard_percentage = len(hard_dataset) / dataset_size
+            adaptive_size = (hard_percentage - string_oversampling_threshold) / (0.5 - string_oversampling_threshold)
+            adaptive_resampling_rate = strict_addition_ratio - adaptive_size * (strict_addition_ratio -
+                                                                                lenient_addition_ratio)
+            hard_dataset_resampled = IM.random_oversampling(adaptive_resampling_rate)
+
         hard_size_after = len(hard_dataset_resampled)
         tensor_datasets['hard'] = hard_dataset_resampled
         print(f"\tAdded {hard_size_after - hard_size_before} hard samples via oversampling.")
@@ -25,7 +42,16 @@ def apply_resampling_techniques(tensor_datasets):
         easy_dataset = tensor_datasets['easy']
         easy_size_before = len(easy_dataset)
         IM = ImbalanceMeasures(easy_dataset, None)
-        easy_dataset_resampled = IM.random_undersampling(0.9)  # Remove 90%
+
+        if len(easy_dataset) < strict_undersampling_threshold * dataset_size:
+            easy_dataset_resampled = IM.random_undersampling(strict_removal_ratio)  # Apply strict rules
+        else:
+            easy_percentage = len(easy_dataset) / dataset_size
+            adaptive_size = (easy_percentage - strict_undersampling_threshold) / (1.0 - strict_undersampling_threshold)
+            adaptive_resampling_rate = strict_removal_ratio - adaptive_size * (strict_removal_ratio -
+                                                                               lenient_removal_ratio)
+            easy_dataset_resampled = IM.random_undersampling(adaptive_resampling_rate)
+
         easy_size_after = len(easy_dataset_resampled)
         tensor_datasets['easy'] = easy_dataset_resampled
         print(f"\tRemoved {easy_size_before - easy_size_after} easy samples via undersampling.")
@@ -34,7 +60,7 @@ def apply_resampling_techniques(tensor_datasets):
         medium_dataset = tensor_datasets['medium']
         medium_size_before = len(medium_dataset)
         IM = ImbalanceMeasures(medium_dataset, None)
-        medium_dataset_resampled = IM.random_undersampling(0.5)  # Remove 50%
+        medium_dataset_resampled = IM.random_undersampling(lenient_removal_ratio)
         medium_size_after = len(medium_dataset_resampled)
         tensor_datasets['medium'] = medium_dataset_resampled
         print(f"\tRemoved {medium_size_before - medium_size_after} medium samples via undersampling.")
@@ -44,7 +70,7 @@ def load_and_prepare_data(model_type, dataset_name) -> List[Tuple[DataLoader, Da
     # Load and normalize dataset
     training_dataset, test_dataset = u.load_data_and_normalize(dataset_name)
     data_tensor, target_tensor = training_dataset.tensors
-    _, _, easy_indices_list, hard_indices_list = u.load_data(
+    easy_indices_list, hard_indices_list, _, _ = u.load_data(
         f'{u.DIVISIONS_SAVE_DIR}part{model_type}{dataset_name}_indices.pkl')
 
     # Divide training_dataset into easy, medium, and hard based on easy_indices and hard_indices
@@ -85,7 +111,7 @@ def load_and_prepare_data(model_type, dataset_name) -> List[Tuple[DataLoader, Da
             hard_dataset = TensorDataset(torch.stack(hard_data), torch.tensor(hard_targets))
             tensor_datasets['hard'] = hard_dataset
 
-        apply_resampling_techniques(tensor_datasets)
+        apply_resampling_techniques(tensor_datasets, len(training_dataset) + len(test_dataset))
 
         # Now combine the tensors from all categories (easy, medium, hard) into one TensorDataset
         combined_data, combined_targets = [], []
