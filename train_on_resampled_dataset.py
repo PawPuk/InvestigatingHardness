@@ -152,6 +152,8 @@ def main(dataset_name: str, models_count: int, model_type: str):
     for metric_idx, (training_loader, test_loader) in tqdm(enumerate(dataloaders)):
         save_dir = f'{u.RESAMPLED_SAVE_DIR}/metric{metric_idx}/'
         os.makedirs(save_dir, exist_ok=True)
+        if dataset_name == 'CIFAR10' and model_type == 'complex' and metric_idx not in [1, 2, 4, 7, 12]:
+            continue
         trainer = EnsembleTrainer(dataset_name, models_count, True, 'part', model_type, save_dir)
         trainer.train_ensemble(training_loader, test_loader)
 
