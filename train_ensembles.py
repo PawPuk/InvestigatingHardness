@@ -69,9 +69,10 @@ class EnsembleTrainer:
                            _use_new_zipfile_serialization=False)  # Ensuring backward compatibility
         if self.save_dir == u.MODEL_SAVE_DIR:
             # Collect all trained models
-            model_paths = self.get_all_trained_model_paths()
-            total_models = len(model_paths)
+            total_models = 25 if self.dataset_name == 'CIFAR10' else 50
+            model_paths = self.get_all_trained_model_paths()[:total_models]
             class_accuracies = np.zeros((total_models, num_classes))  # Store class-level accuracies for all models
+            total_accuracies = np.zeros(total_models)
 
             # Evaluate all models
             for idx, model_path in enumerate(model_paths):
@@ -79,6 +80,7 @@ class EnsembleTrainer:
                 model.load_state_dict(torch.load(model_path))
                 # Evaluate the model on the test set
                 class_accuracies[idx] = u.class_level_test(model, test_loader, num_classes)
+                total_accuracies[idx] = u.test(model, test_loader) / 100
 
             # Save class accuracies
             class_accuracies_file = f"{u.METRICS_SAVE_DIR}{self.training}{self.dataset_name}" \
@@ -88,31 +90,47 @@ class EnsembleTrainer:
             # Measure the consistency of class bias (but only for untouched dataset; don't repeat for resampled case)
             running_avg_class_accuracies = np.array([class_accuracies[:i+1].mean(axis=0) for i in range(total_models)])
             running_std_class_accuracies = np.array([class_accuracies[:i+1].std(axis=0) for i in range(total_models)])
-            self.plot_class_accuracies(running_avg_class_accuracies, running_std_class_accuracies, num_classes)
+            self.plot_class_accuracies(running_avg_class_accuracies, running_std_class_accuracies, total_accuracies,
+                                       num_classes)
 
-    def plot_class_accuracies(self, running_avg_class_accuracies, running_std_class_accuracies, num_classes):
+    def plot_class_accuracies(self, running_avg_class_accuracies, running_std_class_accuracies,
+                              total_accuracies, num_classes):
         """Plot how the average accuracy of each class changes as we increase the number of models."""
-        fig, axes = plt.subplots(2, 5, figsize=(20, 10))  # 2 rows, 5 columns
 
+        fig, ax = plt.subplots(figsize=(10, 6))  # Single figure for all class accuracies
+
+        x_vals = range(1, running_avg_class_accuracies.shape[0] + 1)
+        std_accs = []
         for class_idx in range(num_classes):
-            row, col = divmod(class_idx, 5)  # Calculate row and column indices for the subplot
-            ax = axes[row, col]
-            x_vals = range(1, running_avg_class_accuracies.shape[0] + 1)
             mean_acc = running_avg_class_accuracies[:, class_idx]
             std_acc = running_std_class_accuracies[:, class_idx]
+            std_accs.append(std_acc)
 
-            # Plot accuracy
-            ax.plot(x_vals, mean_acc, label='Mean Accuracy')
-            ax.fill_between(x_vals, mean_acc - std_acc, mean_acc + std_acc, color='gray', alpha=0.3, label='Std Dev')
+            # Plot accuracy for each class
+            ax.plot(x_vals, mean_acc, label=f'Class {class_idx} Mean', linewidth=3)
+            ax.fill_between(x_vals, mean_acc - std_acc, mean_acc + std_acc, alpha=0.1)
 
-            ax.set_title(f'Class {class_idx}')
-            ax.set_xlabel('Number of models')
-            ax.set_ylabel('Avg Accuracy')
+            # Print the final running standard deviation for each class
+            print(f"Final running standard deviation for Class {class_idx}: {std_acc[-1]:.4f}")
+        print(f'Average standard deviation fo class-level accuracies: {np.mean(std_accs):.4f}')
+
+        # Customize the plot
+        ax.set_xlabel('Number of Models in the Ensemble', fontsize=16)
+        ax.set_ylabel('Avg Accuracy', fontsize=16)
+        ax.tick_params(axis='x', labelsize=12)
+        ax.tick_params(axis='y', labelsize=12)
+        ax.set_xlim(1, running_avg_class_accuracies.shape[0])
 
         plt.tight_layout()
+
+        # Save and show the plot
         plt.savefig(f'{u.CLASS_BIAS_SAVE_DIR}{self.training}{self.dataset_name}_class_bias_on_'
-                    f'{self.model_type}ensemble.png')
+                    f'{self.model_type}ensemble.pdf')
         plt.show()
+
+        # Calculate and print the final running standard deviation for overall accuracy (total_accuracies)
+        total_accuracies_final_std = total_accuracies.std()
+        print(f"Final running standard deviation for total accuracy: {total_accuracies_final_std:.4f}")
 
 
 def main(dataset_name: str, models_count: int, training: str, model_type: str):

@@ -335,7 +335,7 @@ def compute_model_based_hardness(dataset_name: str, model_type: str, training: s
         model.load_state_dict(torch.load(model_path, map_location=u.DEVICE))
         model.eval()
         models.append(model)
-    models = models[:2]
+    models = models[:50]
     print(f'Extracting hard and easy samples with model-based approaches over {len(models)} models.')
 
     # Prepare to store results for each sample
@@ -367,18 +367,19 @@ def compute_model_based_hardness(dataset_name: str, model_type: str, training: s
         true_label_vec[label] = 1
         el2n_scores.append(np.linalg.norm(true_label_vec - pred))
 
-    # Compute VoG (Variance of Gradients) Scores
-    for i in tqdm(range(data.size(0))):
-        gradients = []
-        for model in models:
-            model.zero_grad()
-            output = model(data[i:i + 1])
-            loss = torch.nn.functional.cross_entropy(output, torch.tensor([labels[i]]).to(u.DEVICE))
-            loss.backward()
-            grad = model.parameters()
-            grad_values = np.concatenate([param.grad.cpu().numpy().flatten() for param in grad])
-            gradients.append(grad_values)
-        vog_scores.append(np.var(gradients))
+    if dataset_name in ['MNIST', 'KMNIST', 'FashionMNIST']:
+        # Compute VoG (Variance of Gradients) Scores
+        for i in tqdm(range(data.size(0))):
+            gradients = []
+            for model in models:
+                model.zero_grad()
+                output = model(data[i:i + 1])
+                loss = torch.nn.functional.cross_entropy(output, torch.tensor([labels[i]]).to(u.DEVICE))
+                loss.backward()
+                grad = model.parameters()
+                grad_values = np.concatenate([param.grad.cpu().numpy().flatten() for param in grad])
+                gradients.append(grad_values)
+            vog_scores.append(np.var(gradients))
 
     # Compute Margin (Similar to AUM but for a single model)
     for idx, logits in enumerate(avg_logits):
@@ -395,8 +396,8 @@ def compute_model_based_hardness(dataset_name: str, model_type: str, training: s
     return model_based_hardness_metrics
 
 
-def compare_metrics_to_class_accuracies(class_distributions, avg_class_accuracies, num_classes, pcc_output_filename,
-                                        spearman_output_filename):
+def compare_metrics_to_class_accuracies(class_distributions, avg_class_accuracies, num_classes,  metric_abbreviations,
+                                        pcc_output_filename, spearman_output_filename):
     """
     Compare the class-level distribution of hard samples to the class-level accuracies
     for each metric by computing Pearson Correlation Coefficient (PCC) and Spearman's Rank Correlation,
@@ -406,19 +407,11 @@ def compare_metrics_to_class_accuracies(class_distributions, avg_class_accuracie
     samples as values for each metric.
     :param avg_class_accuracies: The average accuracies for each class.
     :param num_classes: The number of classes in the dataset.
+    :param metric_abbreviations: Abbreviations of the metric used in the Figure
     :param pcc_output_filename: The filename for saving the PCC bar plot.
     :param spearman_output_filename: The filename for saving the Spearman bar plot.
     """
-    correlations_pcc = []
-    p_values_pcc = []
-    correlations_spearman = []
-    p_values_spearman = []
-
-    metric_abbreviations = [
-        'SameCentroidDist', 'OtherCentroidDist', 'CentroidDistRatio', 'Same1NNDist', 'Other1NNDist', '1NNRatioDist',
-        'AvgSame40NNDist', 'AvgOther40NNDist', 'AvgAll40NNDist', 'Avg40NNDistRatio', '40NNPercSame', '40NNPercOther',
-        'N3', 'GaussCurv', 'MeanCurv', 'Cleanlab', 'EL2N', 'VoG', 'Margin'
-    ]  # Abbreviations for each metric to keep plot readable.
+    correlations_pcc, p_values_pcc, correlations_spearman, p_values_spearman = [], [], [], []
 
     # Compute both PCC and Spearman for each metric
     for class_distribution in class_distributions:
@@ -779,6 +772,11 @@ def main(dataset_name: str, model_type: str):
 
     full_hardness_metrics = full_proximity_metrics + full_curvature_metrics + full_model_metrics
     part_hardness_metrics = part_proximity_metrics + part_curvature_metrics + part_model_metrics
+    if dataset_name not in ['MNIST', 'KMNIST', 'FashionMNIST']:  # Remove VoG if working with complex models
+        metric_abbreviations.pop(-2)
+        invert_metrics.pop(-2)
+        full_hardness_metrics = tuple(list(full_hardness_metrics).pop(-2))
+        part_hardness_metrics = tuple(list(part_model_metrics).pop(-2))
     full_class_averages = compute_class_averages_of_metrics(full_hardness_metrics, full_training_labels)
 
     # Extract the hardest samples for each metric and compute their class distributions
@@ -799,19 +797,19 @@ def main(dataset_name: str, model_type: str):
     for training in ['full', 'part']:
         distributions = [full_distributions, part_distributions][training == 'part']
         accuracies = [full_avg_class_accuracies, part_avg_class_accuracies][training == 'part']
-        compare_metrics_to_class_accuracies(distributions[0], accuracies, num_classes,
+        compare_metrics_to_class_accuracies(distributions[0], accuracies, num_classes, metric_abbreviations,
                                             f'{training}{model_type}{dataset_name}_adaptive_easyPCC.pdf',
                                             f'{training}{model_type}{dataset_name}_adaptive_easySRC.pdf')
-        compare_metrics_to_class_accuracies(distributions[1], accuracies, num_classes,
+        compare_metrics_to_class_accuracies(distributions[1], accuracies, num_classes, metric_abbreviations,
                                             f'{training}{model_type}{dataset_name}_adaptive_hardPCC.pdf',
                                             f'{training}{model_type}{dataset_name}_adaptive_hardSRC.pdf')
-        compare_metrics_to_class_accuracies(distributions[2], accuracies, num_classes,
+        compare_metrics_to_class_accuracies(distributions[2], accuracies, num_classes, metric_abbreviations,
                                             f'{training}{model_type}{dataset_name}_fixed_easyPCC.pdf',
                                             f'{training}{model_type}{dataset_name}_fixed_easySRC.pdf')
-        compare_metrics_to_class_accuracies(distributions[3], accuracies, num_classes,
+        compare_metrics_to_class_accuracies(distributions[3], accuracies, num_classes, metric_abbreviations,
                                             f'{training}{model_type}{dataset_name}_fixed_hardPCC.pdf',
                                             f'{training}{model_type}{dataset_name}_fixed_hardSRC.pdf')
-        compare_metrics_to_class_accuracies(full_class_averages, accuracies, num_classes,
+        compare_metrics_to_class_accuracies(full_class_averages, accuracies, num_classes, metric_abbreviations,
                                             f'{training}{model_type}{dataset_name}_avgPCC.pdf',
                                             f'{training}{model_type}{dataset_name}_avgSRC.pdf')
 

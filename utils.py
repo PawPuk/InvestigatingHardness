@@ -257,7 +257,7 @@ def test(model: torch.nn.Module, loader: DataLoader) -> float:
             total += target.size(0)  # Increment the total count
             correct += (predicted == target).sum().item()  # Increment the correct count
     accuracy = 100 * correct / total
-    return round(accuracy, 2)
+    return accuracy
 
 
 def dataset_to_tensors(dataset: Dataset) -> Tuple[torch.Tensor, torch.Tensor]:
