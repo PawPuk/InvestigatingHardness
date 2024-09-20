@@ -2,10 +2,10 @@ from typing import Dict, List, Tuple
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader, Subset, TensorDataset
 from tqdm import tqdm
 
-from geometric_measures import Curvature, Proximity
+from geometric_measures import Curvature, ModelBasedMetrics, Proximity
 import utils as u
 
 np.random.seed(42)
@@ -60,6 +60,15 @@ def compute_proximity_metrics(loader: DataLoader, k2: int):
     proximity = Proximity(loader, k=k2)
     proximity_metrics = proximity.compute_proximity_metrics()
     return proximity_metrics
+
+
+def compute_model_based_metrics(dataset_name: str, training: str, training_dataset: TensorDataset):
+    data = training_dataset.tensors[0]
+    labels = training_dataset.tensors[1].numpy()
+    modelBasedMetrics = ModelBasedMetrics(dataset_name, training, data, labels)
+    complex_metrics = modelBasedMetrics.compute_model_based_hardness('complex')
+    simple_metrics = modelBasedMetrics.compute_model_based_hardness('simple')
+    return simple_metrics, complex_metrics
 
 
 """def main(dataset_name: str, models_count: int, long_tailed: bool, imbalance_ratio: float):

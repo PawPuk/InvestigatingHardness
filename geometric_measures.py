@@ -1,3 +1,7 @@
+from glob import glob
+from typing import List
+
+from cleanlab.rank import get_label_quality_scores
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
@@ -227,17 +231,87 @@ class Proximity:
                 adapted_N3.append(n3_different_class)
 
         return (
-            same_centroid_dists,
-            other_centroid_dists,
-            centroid_ratios,
-            closest_same_class_distances,
-            closest_other_class_distances,
-            closest_distance_ratios,
-            avg_same_class_distances,
-            avg_other_class_distances,
-            avg_all_class_distances,
-            avg_distance_ratios,
-            percentage_same_class_knn,
-            percentage_other_class_knn,
-            adapted_N3
+            same_centroid_dists, closest_same_class_distances, avg_same_class_distances,  # Type 1
+            other_centroid_dists, closest_other_class_distances, avg_other_class_distances, percentage_same_class_knn,
+            adapted_N3,  # Type 2
+            centroid_ratios, closest_distance_ratios, avg_distance_ratios,  # Type 3
+            avg_all_class_distances  # Type 4
         )
+
+
+class ModelBasedMetrics:
+    def __init__(self, dataset_name, training, data, labels):
+        self.dataset_name = dataset_name
+        self.training = training
+        self.data = data.to(u.DEVICE)
+        self.labels = labels
+
+    def compute_model_based_hardness(self, model_type):
+        """Compute hardness metrics (Confident Learning, EL2N, VoG, and Margin) using pretrained models."""
+
+        # Load all pretrained models
+        model_paths = glob(f"{u.MODEL_SAVE_DIR}/{self.training}{self.dataset_name}_{model_type}ensemble_*.pth")
+        models = []
+        for model_path in model_paths:
+            model, _ = u.initialize_models(self.dataset_name, model_type)
+            model.load_state_dict(torch.load(model_path, map_location=u.DEVICE))
+            model.eval()
+            models.append(model)
+        models = models[:10] if self.dataset_name == 'CIFAR10' else models[:50]
+        print(f'Extracting hard and easy samples with model-based approaches over {len(models)} models.')
+
+        # Prepare to store results for each sample
+        el2n_scores, vog_scores, margin_scores = [], [], []
+
+        # Accumulate predictions and logits for each model
+        all_outputs = []
+        all_logits = []
+        for model in tqdm(models):
+            with torch.no_grad():
+                outputs = model(self.data).cpu().numpy()
+                logits = torch.softmax(model(self.data), dim=1).cpu().numpy()
+                all_outputs.append(outputs)
+                all_logits.append(logits)
+
+        # Average predictions and logits across the ensemble
+        avg_predictions = np.mean(all_outputs, axis=0)
+        avg_logits = np.mean(all_logits, axis=0)
+
+        # Use Cleanlab for Confident Learning Scores
+        cl_scores = get_label_quality_scores(
+            labels=np.array(self.labels),
+            pred_probs=avg_logits,  # Use softmax probabilities
+        )
+
+        # Compute EL2N (Error L2-Norm) Scores
+        for idx, (pred, label) in enumerate(zip(avg_predictions, self.labels)):
+            true_label_vec = np.zeros_like(pred)
+            true_label_vec[label] = 1
+            el2n_scores.append(np.linalg.norm(true_label_vec - pred))
+
+        # Compute VoG (Variance of Gradients) Scores
+        for i in tqdm(range(self.data.size(0))):
+            gradients = []
+            for model in models:
+                model.zero_grad()
+                output = model(self.data[i:i + 1])
+                loss = torch.nn.functional.cross_entropy(output, torch.tensor([self.labels[i]]).to(u.DEVICE))
+                loss.backward()
+                grad = model.parameters()
+                grad_values = np.concatenate([param.grad.cpu().numpy().flatten() for param in grad])
+                gradients.append(grad_values)
+            vog_scores.append(np.var(gradients))
+
+        # Compute Margin (Similar to AUM but for a single model)
+        for idx, logits in enumerate(avg_logits):
+            correct_logit = logits[self.labels[idx]]
+            sorted_logits = np.sort(logits)
+            if correct_logit == sorted_logits[-1]:
+                margin = correct_logit - sorted_logits[-2]  # Margin between correct and second-highest logit
+            else:
+                margin = correct_logit - sorted_logits[-1]  # Margin between correct and highest logit
+            margin_scores.append(margin)
+
+        model_based_hardness_metrics = (cl_scores, el2n_scores, vog_scores, margin_scores)
+        # Return all computed metrics
+        return model_based_hardness_metrics

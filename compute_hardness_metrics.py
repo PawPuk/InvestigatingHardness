@@ -5,7 +5,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from compute_confidences import compute_curvatures, compute_proximity_metrics
+from compute_confidences import compute_curvatures, compute_model_based_metrics, compute_proximity_metrics
 import utils as u
 
 # Set random seeds for reproducibility
@@ -19,6 +19,7 @@ def main(dataset_name: str, training: str, k2: int):
     # Define file paths for saving and loading cached results
     proximity_file = f"{u.METRICS_SAVE_DIR}{training}{dataset_name}_proximity_indicators.pkl"
     curvature_file = f"{u.METRICS_SAVE_DIR}{training}{dataset_name}_curvature_indicators.pkl"
+    model_based_file = f"{u.METRICS_SAVE_DIR}{training}{dataset_name}_"
     # Load the dataset
     if training == 'full':
         training_dataset = u.load_full_data_and_normalize(dataset_name, to_grayscale=True, apply_pca=True)
@@ -28,18 +29,32 @@ def main(dataset_name: str, training: str, k2: int):
     loader = DataLoader(training_dataset, batch_size=len(training_dataset), shuffle=False)
 
     if os.path.exists(proximity_file):
-        raise Exception(f'Proximities were already computed for {dataset_name}.')
+        print(f'Proximities were already computed for {dataset_name}.')
     else:
         print('Calculating proximities.')
         proximity_metrics = compute_proximity_metrics(loader, k2)
         u.save_data(proximity_metrics, proximity_file)
 
     if os.path.exists(curvature_file):
-        raise Exception(f'Curvatures were already computed for {dataset_name}.')
+        print(f'Curvatures were already computed for {dataset_name}.')
     else:
         print('Calculating curvatures.')
         curvature_metrics = compute_curvatures(loader, k2)
         u.save_data(curvature_metrics, curvature_file)
+
+    if training == 'full':
+        training_dataset = u.load_full_data_and_normalize(dataset_name, to_grayscale=False, apply_pca=False)
+    else:
+        training_dataset, _ = u.load_data_and_normalize(dataset_name, to_grayscale=False, apply_pca=False)
+
+    if os.path.exists(model_based_file):
+        print(f'Model-based hardness metrics were already computed for {dataset_name}.')
+    else:
+        print('Computing model-based hardness metrics')
+        simple_model_based_metrics, complex_model_based_metrics = compute_model_based_metrics(dataset_name, training,
+                                                                                              training_dataset)
+        u.save_data(simple_model_based_metrics, model_based_file + 'simple_model_based_indicators.pkl')
+        u.save_data(complex_model_based_metrics, model_based_file + 'complex_model_based_indicators.pkl')
 
 
 if __name__ == '__main__':
