@@ -55,17 +55,17 @@ def compute_curvatures(loader: DataLoader, k1: int):
     return gaussian_curvatures, mean_curvatures
 
 
-def compute_proximity_metrics(loader: DataLoader, k2: int):
+def compute_proximity_metrics(loader: DataLoader, k2: int, class_loaders: List[DataLoader]):
     """Compute the geometric metrics of the data that can be used to identify hard samples, class-wise."""
-    proximity = Proximity(loader, k=k2)
+    proximity = Proximity(loader, class_loaders, k=k2)
     proximity_metrics = proximity.compute_proximity_metrics()
     return proximity_metrics
 
 
-def compute_model_based_metrics(dataset_name: str, training: str, training_dataset: TensorDataset):
+def compute_model_based_metrics(dataset_name: str, training: str, training_dataset: TensorDataset, ensemble_size: str):
     data = training_dataset.tensors[0]
     labels = training_dataset.tensors[1].numpy()
-    modelBasedMetrics = ModelBasedMetrics(dataset_name, training, data, labels)
+    modelBasedMetrics = ModelBasedMetrics(dataset_name, training, data, labels, ensemble_size)
     complex_metrics = modelBasedMetrics.compute_model_based_hardness('complex')
     simple_metrics = modelBasedMetrics.compute_model_based_hardness('simple')
     return simple_metrics, complex_metrics

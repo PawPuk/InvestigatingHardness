@@ -14,21 +14,21 @@ import utils as u
 
 
 class HardnessImbalanceMeasurer:
-    def __init__(self, dataset_name: str, training: str, model_type: str, mode: str):
+    def __init__(self, dataset_name: str, training: str, model_type: str, ensemble_size: str, grayscale: bool,
+                 pca: bool):
         self.dataset_name = dataset_name
         self.training = training
         self.model_type = model_type
-        self.mode = mode
+        self.ensemble_size = ensemble_size
+        self.grayscale = grayscale
+        self.pca = pca
         self.models = []
-        if mode == 'resampled':
-            self.models_by_metric = self.load_resampled_models()
-        else:
-            self.model_paths = self.get_all_trained_model_paths()
-            # Load models from memory (similar to the logic in `EnsembleTrainer.train_ensemble`)
-            for model_path in self.model_paths:
-                model, _ = u.initialize_models(dataset_name, model_type)
-                model.load_state_dict(torch.load(model_path, map_location=u.DEVICE))
-                self.models.append(model)
+        self.model_paths = self.get_all_trained_model_paths()
+        # Load models from memory (similar to the logic in `EnsembleTrainer.train_ensemble`)
+        for model_path in self.model_paths:
+            model, _ = u.initialize_models(dataset_name, model_type)
+            model.load_state_dict(torch.load(model_path, map_location=u.DEVICE))
+            self.models.append(model)
         if self.training == 'full':
             training_dataset = u.load_full_data_and_normalize(self.dataset_name)
             test_dataset = training_dataset
@@ -41,36 +41,22 @@ class HardnessImbalanceMeasurer:
         self.loader = DataLoader(test_dataset, batch_size=len(test_dataset), shuffle=False)
         self.easy_indices, self.medium_indices, self.hard_indices = self.categorize_indices_by_hardness()
 
-    def load_resampled_models(self):
-        """Load models from resampled directories and store them in a list of lists."""
-        models_by_metric = []  # List of lists, one for each metric
-
-        # Iterate over each metric directory (metric0/ to metric14/)
-        for metric_idx in range(15):  # Assuming metrics 0 to 14 (shouldn't be hardcoded...)
-            metric_dir = os.path.join(u.RESAMPLED_SAVE_DIR, f'metric{metric_idx}/')
-            model_list = []  # To store models for this specific metric
-
-            # Look for model files matching the dataset_name and model_type
-            pattern = f'{metric_dir}part{self.dataset_name}_{self.model_type}ensemble_*'
-            model_paths = glob(pattern)
-
-            # Sort the model paths (they may be in a weird order)
-            model_paths = sorted(model_paths)
-
-            # Load each model and append it to the list
-            for model_path in model_paths:
-                model, _ = u.initialize_models(self.dataset_name, self.model_type)
-                model.load_state_dict(torch.load(model_path, map_location=u.DEVICE))
-                model_list.append(model)
-
-            # Append the model list for this metric (could be empty if no models found)
-            models_by_metric.append(model_list)
-
-        return models_by_metric
+    def get_all_trained_model_paths(self):
+        """Retrieve all trained model paths matching current dataset, training, and model type."""
+        pattern = f"{u.MODEL_SAVE_DIR}{self.training}{self.dataset_name}_{self.model_type}ensemble_*.pth"
+        model_paths = glob(pattern)
+        return sorted(model_paths)
 
     def categorize_indices_by_hardness(self) -> Tuple[List[set], List[set], List[set]]:
-        easy_indices, hard_indices, _, _ = u.load_data(
-            f'{u.DIVISIONS_SAVE_DIR}full{self.model_type}{self.dataset_name}_indices.pkl')
+        # We use full indices as the part indices do not contain information on test samples.
+        indices_dir = f'{u.DIVISIONS_SAVE_DIR}full{self.model_type}{self.dataset_name}_indices'
+        if self.dataset_name == 'CIFAR10':
+            if self.grayscale:
+                indices_dir += 'gray'
+            if self.pca:
+                indices_dir += 'pca'
+
+        easy_indices, hard_indices, _, _ = u.load_data(indices_dir + '.pkl')
         easy_test_indices, medium_test_indices, hard_test_indices = [], [], []
         for metric_idx in range(len(easy_indices)):
             metric_easy_indices = easy_indices[metric_idx]
@@ -92,12 +78,6 @@ class HardnessImbalanceMeasurer:
                 medium_test_indices.append(part_medium_indices)
                 hard_test_indices.append(part_hard_indices)
         return easy_test_indices, medium_test_indices, hard_test_indices
-
-    def get_all_trained_model_paths(self):
-        """Retrieve all trained model paths matching current dataset, training, and model type."""
-        pattern = f"{u.MODEL_SAVE_DIR}{self.training}{self.dataset_name}_{self.model_type}ensemble_*.pth"
-        model_paths = glob(pattern)
-        return sorted(model_paths)
 
     def measure_imbalance_on_one_model(self, model: torch.nn.Module, extreme_indices: set) -> float:
         """Test a single model on a specific set of samples (given by indices) and return accuracy."""
@@ -135,64 +115,6 @@ class HardnessImbalanceMeasurer:
 
         accuracy = correct / total if total > 0 else None  # Using None, as this should not occur.
         return accuracy
-
-    def compare_error_rates(self, normal_accuracies: List[dict], resampled_accuracies: List[dict],
-                            metric_abbreviations: List[str]) -> None:
-        num_metrics = len(normal_accuracies)
-        max_diff = 0
-
-        # Calculate epsilon based on the number of metrics and plot width
-        epsilon = 0.1  # Adjust epsilon to control the spacing between lines for each metric
-
-        # Create a new figure
-        fig, ax = plt.subplots(figsize=(10, 6))
-        # Loop through each metric and compute differences between resampled and normal accuracies
-        for i, (normal_acc, resampled_acc) in enumerate(zip(normal_accuracies, resampled_accuracies)):
-            # Compute differences between resampled and normal (resampled - normal)
-            diff_all = resampled_acc['mean_acc_all'] - normal_acc['mean_acc_all']
-            diff_easy = resampled_acc['mean_acc_easy'] - normal_acc['mean_acc_easy']
-            diff_medium = resampled_acc['mean_acc_medium'] - normal_acc['mean_acc_medium']
-            diff_hard = resampled_acc['mean_acc_hard'] - normal_acc['mean_acc_hard']
-
-            diffs = [diff_all, diff_easy, diff_medium, diff_hard]
-            current_max = max(abs(d) for d in diffs)
-            max_diff = max(max_diff, current_max)
-
-            # Plot differences for all, easy, medium, and hard
-            ax.add_line(Line2D([i - epsilon, i + epsilon], [diff_all, diff_all], color='black', linewidth=5,
-                               label='All' if i == 0 else ""))  # Black for all
-            ax.add_line(Line2D([i - epsilon, i + epsilon], [diff_easy, diff_easy], color='green', linewidth=5,
-                               label='Easy' if i == 0 else ""))  # Green for easy
-            ax.add_line(Line2D([i - epsilon, i + epsilon], [diff_medium, diff_medium], color='blue', linewidth=5,
-                               label='Medium' if i == 0 else ""))  # Blue for medium
-            ax.add_line(Line2D([i - epsilon, i + epsilon], [diff_hard, diff_hard], color='red', linewidth=5,
-                               label='Hard' if i == 0 else ""))  # Red for hard
-
-        # Calculate ylim based on the max difference with an epsilon margin (10% of max difference)
-        epsilon_y = 0.1 * max_diff
-        ax.set_ylim(-max_diff - epsilon_y, max_diff + epsilon_y)
-
-        # Labeling and formatting
-        ax.set_xticks(range(num_metrics))
-        ax.set_xticklabels(metric_abbreviations)
-        ax.set_xlabel('Metric')
-        ax.set_ylabel('Accuracy Difference (Resampled - Normal)')
-        ax.set_title('Accuracy Differences between Resampled and Normal Models across Metrics')
-        ax.grid(True)
-        plt.xticks(rotation=45, ha='right')  # Rotate x-tick labels
-        ax.set_xlim(-0.5, num_metrics - 0.5)  # Padding added to the left and right
-
-        # Add legend
-        handles, labels = ax.get_legend_handles_labels()
-        ax.legend(handles[:4], labels[:4], loc='upper left')
-
-        # Show the plot
-        plt.tight_layout()
-        plt.savefig(f'{u.HARD_IMBALANCE_DIR}{self.model_type}_{self.training}{self.dataset_name}_'
-                    f'{self.mode}_accuracy_differences.pdf')
-        plt.savefig(f'{u.HARD_IMBALANCE_DIR}{self.model_type}_{self.training}{self.dataset_name}_'
-                    f'{self.mode}_accuracy_differences.png')
-        plt.show()
 
     def plot_error_rates(self, accuracies: List[dict], metric_abbreviations: List[str]) -> None:
         """Plot the error rates for all metrics in one figure, with vertical line segments for each error rate type."""
@@ -245,20 +167,25 @@ class HardnessImbalanceMeasurer:
         plt.xticks(rotation=45, ha='right')  # Rotate x-tick labels
         ax.set_xlim(-0.5, num_metrics - 0.5)  # Padding added to the left and right
 
+        save_file = f'{u.HARD_IMBALANCE_DIR}{self.ensemble_size}_{self.model_type}_{self.training}' \
+                    f'{self.dataset_name}_imbalances'
+        if self.dataset_name == 'CIFAR10':
+            if self.grayscale:
+                save_file += 'gray'
+            if self.pca:
+                save_file += 'pca'
+
         # Show the plot
         plt.tight_layout()
-        plt.savefig(f'{u.HARD_IMBALANCE_DIR}{self.model_type}_{self.training}{self.dataset_name}_'
-                    f'{self.mode}imbalances.pdf')
-        plt.savefig(f'{u.HARD_IMBALANCE_DIR}{self.model_type}_{self.training}{self.dataset_name}_'
-                    f'{self.mode}imbalances.png')
+        plt.savefig(save_file + '.pdf')
         plt.show()
 
     def plot_consistency(self, easy_accuracies, medium_accuracies, hard_accuracies, metric_abbreviations: List[str],
                          num_metrics: int):
         """Plot how easy and hard accuracies change as we increase the number of models for each metric."""
-        fig, axes = plt.subplots(3, 5, figsize=(20, 12))
+        fig, axes = plt.subplots(4, 5, figsize=(20, 15))
 
-        total_models = min(len(easy_accuracies[0]), 500)  # Number of models should be the length of inner lists
+        total_models = 10 if self.dataset_name == 'CIFAR10' else 25
         assert len(easy_accuracies) == num_metrics, "Number of metrics should match the length of easy_accuracies"
 
         # Initialize lists to store running averages and standard deviations for easy and hard accuracies
@@ -294,52 +221,57 @@ class HardnessImbalanceMeasurer:
 
             # Plot the accuracies if the samples of the given hardness type exist in the test set
             if -1 not in mean_easy:
-                ax.plot(x_vals, mean_easy, label='Easy Accuracy', color='green')
-                ax.fill_between(x_vals, mean_easy - std_easy, mean_easy + std_easy, color='green', alpha=0.3)
+                ax.plot(x_vals, mean_easy, label='Easy Accuracy', color='green', linewidth=5)
+                ax.fill_between(x_vals, mean_easy - std_easy, mean_easy + std_easy, color='green', alpha=0.1)
             if -1 not in mean_medium:
-                ax.plot(x_vals, mean_medium, label='Medium Accuracy', color='blue')
-                ax.fill_between(x_vals, mean_medium - std_medium, mean_medium + std_medium, color='blue', alpha=0.3)
+                ax.plot(x_vals, mean_medium, label='Medium Accuracy', color='blue', linewidth=5)
+                ax.fill_between(x_vals, mean_medium - std_medium, mean_medium + std_medium, color='blue', alpha=0.1)
             if -1 not in mean_hard:
-                ax.plot(x_vals, mean_hard, label='Hard Accuracy', color='red')
-                ax.fill_between(x_vals, mean_hard - std_hard, mean_hard + std_hard, color='red', alpha=0.3)
+                ax.plot(x_vals, mean_hard, label='Hard Accuracy', color='red', linewidth=5)
+                ax.fill_between(x_vals, mean_hard - std_hard, mean_hard + std_hard, color='red', alpha=0.1)
 
             ax.set_title(f'Metric {metric_abbreviations[metric_idx]}')
             ax.set_xlabel('Number of Models')
             ax.set_ylabel('Accuracy')
             ax.legend()
 
+        save_file = f'{u.CONSISTENCY_SAVE_DIR}{self.ensemble_size}_{self.model_type}_{self.training}' \
+                    f'{self.dataset_name}_imbalance_consistency'
+        if self.dataset_name == 'CIFAR10':
+            if self.grayscale:
+                save_file += 'gray'
+            if self.pca:
+                save_file += 'pca'
         plt.tight_layout()
-        plt.savefig(f'{u.CONSISTENCY_SAVE_DIR}{self.model_type}_{self.training}{self.dataset_name}_'
-                    f'{self.mode}imbalance_consistency.png')
+        plt.savefig(save_file + '.pdf')
         plt.show()
 
     def measure_and_visualize_hardness_based_imbalance(self):
         """Test an ensemble of models on the dataset, returning accuracies for each metric."""
         accuracies, easy_accuracies, medium_accuracies, hard_accuracies = [], [], [], []
         metric_abbreviations = [
-            'SameCentroidDist', 'OtherCentroidDist', 'CentroidDistRatio', 'Same1NNDist', 'Other1NNDist', '1NNRatioDist',
-            'AvgSame40NNDist', 'AvgOther40NNDist', 'AvgAll40NNDist', 'Avg40NNDistRatio', '40NNPercSame',
-            '40NNPercOther', 'N3', 'GaussCurv', 'MeanCurv'
+            'SameCentroidDist', 'Same1NNDist', 'AvgSame40NNDist',
+            'OtherCentroidDist', 'Other1NNDist', 'AvgOther40NNDist', '40NNPercSame', 'N3',
+            'CentroidDistRatio', '1NNRatioDist', 'Avg40NNDistRatio',
+            'AvgAll40NNDist',
+            'GaussCurv', 'MeanCurv',
+            'Cleanlab', 'EL2N', 'VoG', 'Margin'
         ]
-        accuracies_file = f'{u.ACCURACIES_SAVE_DIR}{self.model_type}_{self.training}{self.dataset_name}_accuracies.pkl'
-        resampled_accuracies_file = f'{u.RESAMPLED_ACCURACIES_SAVE_DIR}{self.model_type}_{self.dataset_name}_' \
-                                    f'accuracies.pkl'
+        metric_abbreviations.pop(-2)
+
+        accuracies_file = f'{u.ACCURACIES_SAVE_DIR}{self.ensemble_size}_{self.model_type}_{self.training}' \
+                          f'{self.dataset_name}_accuracies.pkl'
+        total_models = 10 if self.dataset_name == 'CIFAR10' else 25
 
         if os.path.exists(accuracies_file):
-            normal_accuracies, normal_easy_accuracies, normal_medium_accuracies, \
-                normal_hard_accuracies = u.load_data(accuracies_file)
-        if os.path.exists(resampled_accuracies_file):
-            resampled_accuracies, _, _, _ = u.load_data(resampled_accuracies_file)
-        if (self.mode == 'normal' and not os.path.exists(accuracies_file)) or \
-                (self.mode == 'resampled' and not os.path.exists(resampled_accuracies_file)):
+            accuracies, easy_accuracies, medium_accuracies, hard_accuracies = u.load_data(accuracies_file)
+        else:
             for metric_idx in tqdm(range(len(self.easy_indices)), desc='Iterating through metrics'):
                 metric_easy_indices = self.easy_indices[metric_idx]
                 metric_medium_indices = self.medium_indices[metric_idx]
                 metric_hard_indices = self.hard_indices[metric_idx]
                 all_accuracies, easy_acc, medium_acc, hard_acc = [], [], [], []
-                if self.mode == 'resampled':
-                    self.models = self.models_by_metric[metric_idx]
-                for model in self.models[:50]:
+                for model in self.models[:total_models]:
                     all_accuracies.append(self.measure_imbalance_on_one_model(model, set(range(self.dataset_size))))
                     easy_acc.append(self.measure_imbalance_on_one_model(model, metric_easy_indices))
                     medium_acc.append(self.measure_imbalance_on_one_model(model, metric_medium_indices))
@@ -358,22 +290,15 @@ class HardnessImbalanceMeasurer:
                     'mean_acc_hard': np.mean(hard_acc),
                 })
 
-            # Convert the lists to numpy arrays to ensure alignment across metrics
-            easy_accuracies = np.array(easy_accuracies)
-            medium_accuracies = np.array(medium_accuracies)
-            hard_accuracies = np.array(hard_accuracies)
-            if self.mode == 'resampled':
-                u.save_data((accuracies, easy_accuracies, medium_accuracies, hard_accuracies),
-                            resampled_accuracies_file)
-            else:
-                u.save_data((accuracies, easy_accuracies, medium_accuracies, hard_accuracies), accuracies_file)
+        # Convert the lists to numpy arrays to ensure alignment across metrics
+        easy_accuracies = np.array(easy_accuracies)
+        medium_accuracies = np.array(medium_accuracies)
+        hard_accuracies = np.array(hard_accuracies)
+        u.save_data((accuracies, easy_accuracies, medium_accuracies, hard_accuracies), accuracies_file)
 
-        if self.mode == 'resampled':
-            self.compare_error_rates(normal_accuracies, resampled_accuracies, metric_abbreviations)
-        else:
-            self.plot_error_rates(accuracies, metric_abbreviations)
-            self.plot_consistency(easy_accuracies, medium_accuracies, hard_accuracies, metric_abbreviations,
-                                  len(self.easy_indices))
+        self.plot_error_rates(accuracies, metric_abbreviations)
+        self.plot_consistency(easy_accuracies, medium_accuracies, hard_accuracies, metric_abbreviations,
+                              len(self.easy_indices))
 
 
 if __name__ == "__main__":
@@ -386,8 +311,12 @@ if __name__ == "__main__":
                              ' (full), or the ones trained only on the training set (part).')
     parser.add_argument('--model_type', type=str, choices=['simple', 'complex'], default='complex',
                         help='Specifies the type of network used for training (MLP vs LeNet or ResNet20 vs ResNet56).')
-    parser.add_argument('--mode', type=str, choices=['normal', 'resampled'], default='normal',
-                        help='Change to `resampled` to specify that this is run on resampled models.')
+    parser.add_argument('--ensemble_size', type=str, choices=['small', 'large'], default='small',
+                        help='Specifies the size of the ensembles to be used in the experiments.')
+    parser.add_argument('--grayscale', action='store_true',
+                        help='Raise to use grayscale transformation for CIFAR10 when computing Proximity metrics')
+    parser.add_argument('--pca', action='store_true', help='Raise to use PCA for CIFAR10 when computing Proximity '
+                                                           'metrics (can be combined with --grayscale).')
     args = parser.parse_args()
 
     # Call the main function with the parsed arguments

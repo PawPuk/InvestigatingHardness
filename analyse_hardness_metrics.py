@@ -203,7 +203,7 @@ def plot_metric_results(metric_idx: int, sorted_normalized_metric: np.ndarray, a
 
 def extract_extreme_samples_threshold(metrics: List[List[float]], labels: List[int], dataset_name: str, model_type: str,
                                       invert: List[bool], training: str, metric_abbreviations: List[str],
-                                      hard_threshold_percent: float = 0.15):
+                                      fixed_threshold_percent: float = 0.15):
     """Extract easy and hard samples using both adaptive and hard thresholds, returning their indices and
     distributions."""
     num_metrics = len(metrics)
@@ -214,15 +214,15 @@ def extract_extreme_samples_threshold(metrics: List[List[float]], labels: List[i
     adaptive_easy_distributions = []
     adaptive_hard_distributions = []
 
-    hard_easy_samples = []
-    hard_hard_samples = []
-    hard_easy_distributions = []
-    hard_hard_distributions = []
+    fixed_easy_samples = []
+    fixed_hard_samples = []
+    fixed_easy_distributions = []
+    fixed_hard_distributions = []
 
     for metric_idx in range(num_metrics):
         selected_metric = np.array(metrics[metric_idx])
         num_samples = len(selected_metric)
-        hard_threshold_count = int(hard_threshold_percent * num_samples)
+        fixed_threshold = int(fixed_threshold_percent * num_samples)
 
         # Replace inf values with twice the maximum finite value
         max_finite_value = np.max(selected_metric[np.isfinite(selected_metric)])
@@ -265,8 +265,8 @@ def extract_extreme_samples_threshold(metrics: List[List[float]], labels: List[i
         adaptive_easy_dist = defaultdict(int)
         adaptive_hard_dist = defaultdict(int)
 
-        hard_easy_dist = defaultdict(int)
-        hard_hard_dist = defaultdict(int)
+        fixed_easy_dist = defaultdict(int)
+        fixed_hard_dist = defaultdict(int)
 
         # Adaptive (soft) threshold logic based on division points and invert flag
         if first_division_point is not None and second_division_point is not None:
@@ -274,20 +274,20 @@ def extract_extreme_samples_threshold(metrics: List[List[float]], labels: List[i
                 # If invert is True: Left side is hard, right side is easy
                 adaptive_hard_indices = sorted_indices[:first_division_point]
                 adaptive_easy_indices = sorted_indices[second_division_point:]
-                hard_hard_indices = sorted_indices[:hard_threshold_count]
-                hard_easy_indices = sorted_indices[-hard_threshold_count:]
+                hard_hard_indices = sorted_indices[:fixed_threshold]
+                hard_easy_indices = sorted_indices[-fixed_threshold:]
             else:
                 # If invert is False: Left side is easy, right side is hard
                 adaptive_easy_indices = sorted_indices[:first_division_point]
                 adaptive_hard_indices = sorted_indices[second_division_point:]
-                hard_easy_indices = sorted_indices[:hard_threshold_count]
-                hard_hard_indices = sorted_indices[-hard_threshold_count:]
+                hard_easy_indices = sorted_indices[:fixed_threshold]
+                hard_hard_indices = sorted_indices[-fixed_threshold:]
 
             # Store those samples
             adaptive_easy_samples.append(adaptive_easy_indices.tolist())
             adaptive_hard_samples.append(adaptive_hard_indices.tolist())
-            hard_easy_samples.append(hard_easy_indices.tolist())
-            hard_hard_samples.append(hard_hard_indices.tolist())
+            fixed_easy_samples.append(hard_easy_indices.tolist())
+            fixed_hard_samples.append(hard_hard_indices.tolist())
 
             # Compute class distributions for those samples
             for idx in adaptive_easy_indices:
@@ -300,110 +300,37 @@ def extract_extreme_samples_threshold(metrics: List[List[float]], labels: List[i
 
             for idx in hard_easy_indices:
                 class_label = labels[idx]
-                hard_easy_dist[class_label] += 1
+                fixed_easy_dist[class_label] += 1
 
             for idx in hard_hard_indices:
                 class_label = labels[idx]
-                hard_hard_dist[class_label] += 1
+                fixed_hard_dist[class_label] += 1
         else:
             raise Exception
 
         # Append the distributions
         adaptive_easy_distributions.append(adaptive_easy_dist)
         adaptive_hard_distributions.append(adaptive_hard_dist)
-        hard_easy_distributions.append(hard_easy_dist)
-        hard_hard_distributions.append(hard_hard_dist)
+        fixed_easy_distributions.append(fixed_easy_dist)
+        fixed_hard_distributions.append(fixed_hard_dist)
 
         # Plot results and pass hard thresholds to the plotting function
         plot_metric_results(metric_idx, sorted_normalized_metric, avg_gradients, first_division_point,
-                            second_division_point, dataset_name, invert[metric_idx], hard_threshold_percent, training,
+                            second_division_point, dataset_name, invert[metric_idx], fixed_threshold_percent, training,
                             model_type, metric_abbreviations)
 
-    return (adaptive_easy_samples, adaptive_hard_samples, hard_easy_samples, hard_hard_samples), \
-        (adaptive_easy_distributions, adaptive_hard_distributions, hard_easy_distributions, hard_hard_distributions)
-
-
-def compute_model_based_hardness(dataset_name: str, model_type: str, training: str, data: torch.Tensor,
-                                 labels: List[int]):
-    """Compute hardness metrics (Confident Learning, EL2N, VoG, and Margin) using pretrained models."""
-
-    # Load all pretrained models
-    model_paths = glob(f"{u.MODEL_SAVE_DIR}/{training}{dataset_name}_{model_type}ensemble_*.pth")
-    models = []
-    for model_path in model_paths:
-        model, _ = u.initialize_models(dataset_name, model_type)
-        model.load_state_dict(torch.load(model_path, map_location=u.DEVICE))
-        model.eval()
-        models.append(model)
-    models = models[:50]
-    print(f'Extracting hard and easy samples with model-based approaches over {len(models)} models.')
-
-    # Prepare to store results for each sample
-    el2n_scores, vog_scores, margin_scores = [], [], []
-
-    # Accumulate predictions and logits for each model
-    all_outputs = []
-    all_logits = []
-    for model in tqdm(models):
-        with torch.no_grad():
-            outputs = model(data).cpu().numpy()
-            logits = torch.softmax(model(data), dim=1).cpu().numpy()
-            all_outputs.append(outputs)
-            all_logits.append(logits)
-
-    # Average predictions and logits across the ensemble
-    avg_predictions = np.mean(all_outputs, axis=0)
-    avg_logits = np.mean(all_logits, axis=0)
-
-    # Use Cleanlab for Confident Learning Scores
-    cl_scores = get_label_quality_scores(
-        labels=np.array(labels),
-        pred_probs=avg_logits,  # Use softmax probabilities
-    )
-
-    # Compute EL2N (Error L2-Norm) Scores
-    for idx, (pred, label) in enumerate(zip(avg_predictions, labels)):
-        true_label_vec = np.zeros_like(pred)
-        true_label_vec[label] = 1
-        el2n_scores.append(np.linalg.norm(true_label_vec - pred))
-
-    if dataset_name in ['MNIST', 'KMNIST', 'FashionMNIST']:
-        # Compute VoG (Variance of Gradients) Scores
-        for i in tqdm(range(data.size(0))):
-            gradients = []
-            for model in models:
-                model.zero_grad()
-                output = model(data[i:i + 1])
-                loss = torch.nn.functional.cross_entropy(output, torch.tensor([labels[i]]).to(u.DEVICE))
-                loss.backward()
-                grad = model.parameters()
-                grad_values = np.concatenate([param.grad.cpu().numpy().flatten() for param in grad])
-                gradients.append(grad_values)
-            vog_scores.append(np.var(gradients))
-
-    # Compute Margin (Similar to AUM but for a single model)
-    for idx, logits in enumerate(avg_logits):
-        correct_logit = logits[labels[idx]]
-        sorted_logits = np.sort(logits)
-        if correct_logit == sorted_logits[-1]:
-            margin = correct_logit - sorted_logits[-2]  # Margin between correct and second-highest logit
-        else:
-            margin = correct_logit - sorted_logits[-1]  # Margin between correct and highest logit
-        margin_scores.append(margin)
-
-    model_based_hardness_metrics = (cl_scores, el2n_scores, vog_scores, margin_scores)
-    # Return all computed metrics
-    return model_based_hardness_metrics
+    return (adaptive_easy_samples, adaptive_hard_samples, fixed_easy_samples, fixed_hard_samples), \
+        (adaptive_easy_distributions, adaptive_hard_distributions, fixed_easy_distributions, fixed_hard_distributions)
 
 
 def compare_metrics_to_class_accuracies(class_distributions, avg_class_accuracies, num_classes,  metric_abbreviations,
-                                        pcc_output_filename, spearman_output_filename):
+                                        dataset_name, grayscale, pca, pcc_output_filename, spearman_output_filename):
     """
     Compare the class-level distribution of hard samples to the class-level accuracies
     for each metric by computing Pearson Correlation Coefficient (PCC) and Spearman's Rank Correlation,
     and plotting the results for both correlations.
 
-    :param class_distributions: List of dictionaries, each containing class labels as keys and the count of hardest
+    :param class_distributions: List of dictionaries, each containing class labels as keys and the count of the hardest
     samples as values for each metric.
     :param avg_class_accuracies: The average accuracies for each class.
     :param num_classes: The number of classes in the dataset.
@@ -411,6 +338,15 @@ def compare_metrics_to_class_accuracies(class_distributions, avg_class_accuracie
     :param pcc_output_filename: The filename for saving the PCC bar plot.
     :param spearman_output_filename: The filename for saving the Spearman bar plot.
     """
+    if dataset_name == 'CIFAR10':
+        if grayscale:
+            pcc_output_filename += 'gray'
+            spearman_output_filename += 'gray'
+        if pca:
+            pcc_output_filename += 'pca'
+            spearman_output_filename += 'pca'
+    pcc_output_filename += '.pdf'
+    spearman_output_filename += '.pdf'
     correlations_pcc, p_values_pcc, correlations_spearman, p_values_spearman = [], [], [], []
 
     # Compute both PCC and Spearman for each metric
@@ -545,13 +481,17 @@ def compute_class_averages_of_metrics(metrics, labels):
     return class_averages
 
 
-def visualize_evaluation_results(hard_indices, abbreviations, save_path, num_benchmark_methods=4):
+def visualize_evaluation_results(hard_indices, abbreviations, dataset_name, grayscale, pca, save_path,
+                                 num_benchmark_methods=3):
     """
     Visualize the evaluation of normal methods against benchmark methods using heatmaps and tables.
 
     :param hard_indices: List of lists, where the last `num_benchmark_methods` are benchmark methods,
                          and the others are normal methods.
     :param abbreviations: Abbreviations for each of the metrics used.
+    :param dataset_name: name of the dataset
+    :param grayscale: Bool flag.
+    :param pca: Bool flag.
     :param save_path: Path used to save the heatmaps.
     :param num_benchmark_methods: Number of benchmark methods at the end of the list.
     """
@@ -572,9 +512,9 @@ def visualize_evaluation_results(hard_indices, abbreviations, save_path, num_ben
     print("\nRecall Scores:\n", df_recall)
     print("\nAUC Scores:\n", df_auc)
 
-    # Heatmap for Recall
+    # Heatmap for Recall (range 0 to 1)
     plt.figure(figsize=(7, 6))
-    sns.heatmap(recall_matrix, annot=True, cmap='Greens', cbar=True,
+    sns.heatmap(recall_matrix, annot=True, cmap='Greens', cbar=True, vmin=0, vmax=1,  # Fix the color range
                 xticklabels=abbreviations[num_normal_methods:], yticklabels=abbreviations[:num_normal_methods])
     plt.yticks(rotation=0)
     plt.title('Recall Heatmap')
@@ -582,18 +522,23 @@ def visualize_evaluation_results(hard_indices, abbreviations, save_path, num_ben
     plt.savefig(save_path + 'recall_heatmap.pdf')  # Save recall heatmap
     plt.close()  # Close the plot to avoid overwriting
 
-    # Heatmap for AUC
+    # Heatmap for AUC (range 0 to 1)
     plt.figure(figsize=(7, 6))
-    sns.heatmap(auc_matrix, annot=True, cmap='Purples', cbar=True,
+    sns.heatmap(auc_matrix, annot=True, cmap='Purples', cbar=True, vmin=0, vmax=1,  # Fix the color range
                 xticklabels=abbreviations[num_normal_methods:], yticklabels=abbreviations[:num_normal_methods])
     plt.yticks(rotation=0)
     plt.title('AUC Heatmap')
     plt.tight_layout()
+    if dataset_name == 'CIFAR10':
+        if grayscale:
+            save_path += 'gray'
+        if pca:
+            save_path += 'pca'
     plt.savefig(save_path + 'auc_heatmap.pdf')  # Save AUC heatmap
     plt.close()  # Close the plot to avoid overwriting
 
 
-def compute_correlation_heatmaps(hard_indices, num_benchmark_methods=4):
+def compute_correlation_heatmaps(hard_indices, num_benchmark_methods=3):
     benchmark_methods = hard_indices[-num_benchmark_methods:]  # Ground truth (benchmark)
     evaluated_methods = hard_indices[:-num_benchmark_methods]  # Methods to evaluate
 
@@ -731,18 +676,49 @@ def compute_iou(adaptive_indices, full_indices):
     return iou
 
 
-def main(dataset_name: str, model_type: str):
+def main(dataset_name: str, model_type: str, ensemble_size: str, grayscale: bool, pca: bool):
     # Define file paths for saving and loading cached results
-    full_accuracies_file = f"{u.METRICS_SAVE_DIR}full{dataset_name}_avg_class_accuracies_on_{model_type}ensemble.pkl"
-    part_accuracies_file = f"{u.METRICS_SAVE_DIR}part{dataset_name}_avg_class_accuracies_on_{model_type}ensemble.pkl"
-    full_proximity_file = f"{u.METRICS_SAVE_DIR}full{dataset_name}_proximity_indicators.pkl"
-    part_proximity_file = f"{u.METRICS_SAVE_DIR}part{dataset_name}_proximity_indicators.pkl"
-    full_curvature_file = f"{u.METRICS_SAVE_DIR}full{dataset_name}_curvature_indicators.pkl"
-    part_curvature_file = f"{u.METRICS_SAVE_DIR}part{dataset_name}_curvature_indicators.pkl"
+    full_accuracies_file = f"{u.METRICS_SAVE_DIR}{ensemble_size}_full{dataset_name}_avg_class_accuracies_on_" \
+                           f"{model_type}ensemble.pkl"
+    part_accuracies_file = f"{u.METRICS_SAVE_DIR}{ensemble_size}_part{dataset_name}_avg_class_accuracies_on_" \
+                           f"{model_type}ensemble.pkl"
+    full_proximity_file = f"{u.METRICS_SAVE_DIR}full{dataset_name}"
+    part_proximity_file = f"{u.METRICS_SAVE_DIR}part{dataset_name}"
+    full_curvature_file = f"{u.METRICS_SAVE_DIR}full{dataset_name}"
+    part_curvature_file = f"{u.METRICS_SAVE_DIR}part{dataset_name}"
+    full_save_dir = f"{u.DIVISIONS_SAVE_DIR}/full{model_type}{dataset_name}_indices"
+    part_save_dir = f"{u.DIVISIONS_SAVE_DIR}/part{model_type}{dataset_name}_indices"
+    if dataset_name == 'CIFAR10':
+        if grayscale:
+            full_proximity_file += 'gray'
+            part_proximity_file += 'gray'
+            full_curvature_file += 'gray'
+            part_curvature_file += 'gray'
+            full_save_dir += 'gray'
+            part_save_dir += 'gray'
+        if pca:
+            full_proximity_file += 'pca'
+            part_proximity_file += 'pca'
+            full_curvature_file += 'pca'
+            part_curvature_file += 'pca'
+            full_save_dir += 'pca'
+            part_save_dir += 'pca'
+    full_proximity_file += "_proximity_indicators.pkl"
+    part_proximity_file += "_proximity_indicators.pkl"
+    full_curvature_file += "_curvature_indicators.pkl"
+    part_curvature_file += "_curvature_indicators.pkl"
+    full_save_dir += '.pkl'
+    part_save_dir += '.pkl'
+    full_model_file = f"{u.METRICS_SAVE_DIR}{ensemble_size}_full{dataset_name}_{model_type}_model_based_indicators.pkl"
+    part_model_file = f"{u.METRICS_SAVE_DIR}{ensemble_size}_part{dataset_name}_{model_type}_model_based_indicators.pkl"
+
     metric_abbreviations = [
-        'SameCentroidDist', 'OtherCentroidDist', 'CentroidDistRatio', 'Same1NNDist', 'Other1NNDist', '1NNRatioDist',
-        'AvgSame40NNDist', 'AvgOther40NNDist', 'AvgAll40NNDist', 'Avg40NNDistRatio', '40NNPercSame', '40NNPercOther',
-        'N3', 'GaussCurv', 'MeanCurv', 'Cleanlab', 'EL2N', 'VoG', 'Margin'
+        'SameCentroidDist', 'Same1NNDist', 'AvgSame40NNDist',
+        'OtherCentroidDist', 'Other1NNDist', 'AvgOther40NNDist', '40NNPercOther', 'N3',
+        'CentroidDistRatio', '1NNRatioDist', 'Avg40NNDistRatio',
+        'AvgAll40NNDist',
+        'GaussCurv', 'MeanCurv',
+        'Cleanlab', 'EL2N', 'VoG', 'Margin'
     ]
 
     # Load the dataset and metrics
@@ -756,27 +732,24 @@ def main(dataset_name: str, model_type: str):
     part_proximity_metrics = u.load_data(part_proximity_file)
     full_curvature_metrics = u.load_data(full_curvature_file)
     part_curvature_metrics = u.load_data(part_curvature_file)
-    full_training_data = full_training_dataset.tensors[0]
-    part_training_data = part_training_dataset.tensors[0]
+    full_model_metrics = u.load_data(full_model_file)
+    part_model_metrics = u.load_data(part_model_file)
     full_training_labels = full_training_dataset.tensors[1].numpy()
     part_training_labels = part_training_dataset.tensors[1].numpy()
     num_classes = len(np.unique(full_training_labels))
 
-    invert_metrics = [False, True, False, False, True, False, False, True, False, False, True, False, False,
-                      False, False, True, False, False, True]
+    invert_metrics = [False, False, False,  # For metrics measuring intra-class structure
+                      True, True, True, False, False,  # For metrics measuring separation from other classes
+                      False, False, False,  # For radio-based metrics
+                      False,  # For density based-metrics
+                      False, False,  # For curvature-based metrics
+                      True, False, False, True]  # For model-based metrics
 
-    full_model_metrics = compute_model_based_hardness(dataset_name, model_type, 'full', full_training_data,
-                                                      full_training_labels)
-    part_model_metrics = compute_model_based_hardness(dataset_name, model_type, 'part', part_training_data,
-                                                      part_training_labels)
+    metric_abbreviations.pop(-2)
+    invert_metrics.pop(-2)
 
     full_hardness_metrics = full_proximity_metrics + full_curvature_metrics + full_model_metrics
     part_hardness_metrics = part_proximity_metrics + part_curvature_metrics + part_model_metrics
-    if dataset_name not in ['MNIST', 'KMNIST', 'FashionMNIST']:  # Remove VoG if working with complex models
-        metric_abbreviations.pop(-2)
-        invert_metrics.pop(-2)
-        full_hardness_metrics = tuple(list(full_hardness_metrics).pop(-2))
-        part_hardness_metrics = tuple(list(part_model_metrics).pop(-2))
     full_class_averages = compute_class_averages_of_metrics(full_hardness_metrics, full_training_labels)
 
     # Extract the hardest samples for each metric and compute their class distributions
@@ -788,47 +761,81 @@ def main(dataset_name: str, model_type: str):
                                                                          'part', metric_abbreviations)
 
     # Compare the indices obtained via data-based approaches and model-based approaches (use the latter as ground truth)
-    visualize_evaluation_results(full_indices[1], metric_abbreviations,
-                                 f"{u.HEATMAP_SAVE_DIR}{model_type}_full{dataset_name}_")
-    visualize_evaluation_results(part_indices[1], metric_abbreviations,
-                                 f"{u.HEATMAP_SAVE_DIR}{model_type}_part{dataset_name}_")
+    visualize_evaluation_results(full_indices[0], metric_abbreviations, dataset_name, grayscale, pca,
+                                 f"{u.HEATMAP_SAVE_DIR}{model_type}_adaptive_easy_full{dataset_name}_")
+    visualize_evaluation_results(part_indices[0], metric_abbreviations, dataset_name, grayscale, pca,
+                                 f"{u.HEATMAP_SAVE_DIR}{model_type}_adaptive_easy_part{dataset_name}_")
+    visualize_evaluation_results(full_indices[1], metric_abbreviations, dataset_name, grayscale, pca,
+                                 f"{u.HEATMAP_SAVE_DIR}{model_type}_adaptive_hard_full{dataset_name}_")
+    visualize_evaluation_results(part_indices[1], metric_abbreviations, dataset_name, grayscale, pca,
+                                 f"{u.HEATMAP_SAVE_DIR}{model_type}_adaptive_hard_part{dataset_name}_")
+    visualize_evaluation_results(full_indices[2], metric_abbreviations, dataset_name, grayscale, pca,
+                                 f"{u.HEATMAP_SAVE_DIR}{model_type}_fixed_easy_full{dataset_name}_")
+    visualize_evaluation_results(part_indices[2], metric_abbreviations, dataset_name, grayscale, pca,
+                                 f"{u.HEATMAP_SAVE_DIR}{model_type}_fixed_easy_part{dataset_name}_")
+    visualize_evaluation_results(full_indices[3], metric_abbreviations, dataset_name, grayscale, pca,
+                                 f"{u.HEATMAP_SAVE_DIR}{model_type}_fixed_hard_full{dataset_name}_")
+    visualize_evaluation_results(part_indices[3], metric_abbreviations, dataset_name, grayscale, pca,
+                                 f"{u.HEATMAP_SAVE_DIR}{model_type}_fixed_hard_part{dataset_name}_")
 
     # Measure the correlation between the distributions of hard samples and class-level accuracies
     for training in ['full', 'part']:
         distributions = [full_distributions, part_distributions][training == 'part']
         accuracies = [full_avg_class_accuracies, part_avg_class_accuracies][training == 'part']
         compare_metrics_to_class_accuracies(distributions[0], accuracies, num_classes, metric_abbreviations,
-                                            f'{training}{model_type}{dataset_name}_adaptive_easyPCC.pdf',
-                                            f'{training}{model_type}{dataset_name}_adaptive_easySRC.pdf')
+                                            dataset_name, grayscale, pca,
+                                            f'{training}{model_type}{dataset_name}_adaptive_easyPCC',
+                                            f'{training}{model_type}{dataset_name}_adaptive_easySRC')
         compare_metrics_to_class_accuracies(distributions[1], accuracies, num_classes, metric_abbreviations,
-                                            f'{training}{model_type}{dataset_name}_adaptive_hardPCC.pdf',
-                                            f'{training}{model_type}{dataset_name}_adaptive_hardSRC.pdf')
+                                            dataset_name, grayscale, pca,
+                                            f'{training}{model_type}{dataset_name}_adaptive_hardPCC',
+                                            f'{training}{model_type}{dataset_name}_adaptive_hardSRC')
         compare_metrics_to_class_accuracies(distributions[2], accuracies, num_classes, metric_abbreviations,
-                                            f'{training}{model_type}{dataset_name}_fixed_easyPCC.pdf',
-                                            f'{training}{model_type}{dataset_name}_fixed_easySRC.pdf')
+                                            dataset_name, grayscale, pca,
+                                            f'{training}{model_type}{dataset_name}_fixed_easyPCC',
+                                            f'{training}{model_type}{dataset_name}_fixed_easySRC')
         compare_metrics_to_class_accuracies(distributions[3], accuracies, num_classes, metric_abbreviations,
-                                            f'{training}{model_type}{dataset_name}_fixed_hardPCC.pdf',
-                                            f'{training}{model_type}{dataset_name}_fixed_hardSRC.pdf')
+                                            dataset_name, grayscale, pca,
+                                            f'{training}{model_type}{dataset_name}_fixed_hardPCC',
+                                            f'{training}{model_type}{dataset_name}_fixed_hardSRC')
         compare_metrics_to_class_accuracies(full_class_averages, accuracies, num_classes, metric_abbreviations,
-                                            f'{training}{model_type}{dataset_name}_avgPCC.pdf',
-                                            f'{training}{model_type}{dataset_name}_avgSRC.pdf')
+                                            dataset_name, grayscale, pca,
+                                            f'{training}{model_type}{dataset_name}_avgPCC',
+                                            f'{training}{model_type}{dataset_name}_avgSRC')
 
     # Measure the ratio of easy:hard samples in the training and test splits proposed by PyTorch
+    """print('Computing easy:hard ratios obtained by adaptive threshold in training and test splits proposed by PyTorch.')
     compute_easy_hard_ratios(dataset_name, full_indices[0], full_indices[1])
+    print('\nComputing easy:hard ratios obtained by fixed threshold in training and test splits proposed by PyTorch.')
+    compute_easy_hard_ratios(dataset_name, full_indices[2], full_indices[3])"""
 
-    iou_values_easy = []
-    iou_values_hard = []
-    spearman_values_easy = []
-    spearman_values_hard = []
-    kendall_values_easy = []
-    kendall_values_hard = []
-    # TODO: Modify the below to work with fixes, and change the threshold for fixed to 10%
-    for metric_idx, (adaptive_easy, adaptive_hard) in enumerate(zip(part_indices[2], part_indices[3])):
+    """adaptive_iou_values_easy = []
+    adaptive_iou_values_hard = []
+    adaptive_spearman_values_easy = []
+    adaptive_spearman_values_hard = []
+    adaptive_kendall_values_easy = []
+    adaptive_kendall_values_hard = []
+
+    fixed_iou_values_easy = []
+    fixed_iou_values_hard = []
+    fixed_spearman_values_easy = []
+    fixed_spearman_values_hard = []
+    fixed_kendall_values_easy = []
+    fixed_kendall_values_hard = []
+    # TODO: Modify the below to work with fixes
+    for metric_idx in range(len(part_indices[2])):
+        adaptive_easy, adaptive_hard = zip(part_indices[0], part_indices[1])
+        fixed_easy, fixed_hard = zip(part_indices[2], part_indices[3])
+
         # Compute IoU
-        easy_iou = compute_iou(adaptive_easy, full_indices[0][metric_idx])
-        hard_iou = compute_iou(adaptive_hard, full_indices[1][metric_idx])
-        iou_values_easy.append(easy_iou)
-        iou_values_hard.append(hard_iou)
+        adaptive_easy_iou = compute_iou(adaptive_easy, full_indices[0][metric_idx])
+        adaptive_hard_iou = compute_iou(adaptive_hard, full_indices[1][metric_idx])
+        fixed_easy_iou = compute_iou(fixed_easy, full_indices[2][metric_idx])
+        fixed_hard_iou = compute_iou(fixed_hard, full_indices[3][metric_idx])
+        adaptive_iou_values_easy.append(adaptive_easy_iou)
+        adaptive_iou_values_hard.append(adaptive_hard_iou)
+        fixed_iou_values_easy.append(fixed_easy_iou)
+        fixed_iou_values_hard.append(fixed_hard_iou)
 
         # Adjust the easy and hard indices obtained via full and part setting to have the same length
         if len(adaptive_easy) > len(full_indices[0][metric_idx]):
@@ -857,10 +864,10 @@ def main(dataset_name: str, model_type: str):
     plot_consistency_metrics(metric_abbreviations, iou_values_easy, spearman_values_easy, kendall_values_easy,
                              f'{u.CONSISTENCY_SAVE_DIR}{model_type}{dataset_name}_easy_consistency.pdf')
     plot_consistency_metrics(metric_abbreviations, iou_values_hard, spearman_values_hard, kendall_values_hard,
-                             f'{u.CONSISTENCY_SAVE_DIR}{model_type}{dataset_name}_hard_consistency.pdf')
+                             f'{u.CONSISTENCY_SAVE_DIR}{model_type}{dataset_name}_hard_consistency.pdf')"""
 
-    u.save_data(full_indices, f'{u.DIVISIONS_SAVE_DIR}/full{model_type}{dataset_name}_indices.pkl')
-    u.save_data(part_indices, f'{u.DIVISIONS_SAVE_DIR}/part{model_type}{dataset_name}_indices.pkl')
+    u.save_data(full_indices, full_save_dir)
+    u.save_data(part_indices, part_save_dir)
 
 
 if __name__ == '__main__':
@@ -872,6 +879,12 @@ if __name__ == '__main__':
                         help='Name of the dataset (MNIST, CIFAR10, CIFAR100).')
     parser.add_argument('--model_type', type=str, choices=['simple', 'complex'], default='complex',
                         help='Specifies the type of network used for training (MLP vs LeNet or ResNet20 vs ResNet56).')
+    parser.add_argument('--ensemble_size', type=str, choices=['small', 'large'], default='small',
+                        help='Specifies the size of the ensembles to be used in the experiments.')
+    parser.add_argument('--grayscale', action='store_true',
+                        help='Raise to use grayscale transformation for CIFAR10 when computing Proximity metrics')
+    parser.add_argument('--pca', action='store_true', help='Raise to use PCA for CIFAR10 when computing Proximity '
+                                                           'metrics (can be combined with --grayscale).')
     args = parser.parse_args()
 
     main(**vars(args))

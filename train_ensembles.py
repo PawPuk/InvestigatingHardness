@@ -69,7 +69,7 @@ class EnsembleTrainer:
                            _use_new_zipfile_serialization=False)  # Ensuring backward compatibility
         if self.save_dir == u.MODEL_SAVE_DIR:
             # Collect all trained models
-            total_models = 25 if self.dataset_name == 'CIFAR10' else 50
+            total_models = 10 if self.dataset_name == 'CIFAR10' else 25
             model_paths = self.get_all_trained_model_paths()[:total_models]
             class_accuracies = np.zeros((total_models, num_classes))  # Store class-level accuracies for all models
             total_accuracies = np.zeros(total_models)
@@ -107,18 +107,18 @@ class EnsembleTrainer:
             std_accs.append(std_acc)
 
             # Plot accuracy for each class
-            ax.plot(x_vals, mean_acc, label=f'Class {class_idx} Mean', linewidth=3)
-            ax.fill_between(x_vals, mean_acc - std_acc, mean_acc + std_acc, alpha=0.1)
+            ax.plot(x_vals, mean_acc, label=f'Class {class_idx} Mean', linewidth=6)
+            # ax.fill_between(x_vals, mean_acc - std_acc, mean_acc + std_acc, alpha=0.1)
 
             # Print the final running standard deviation for each class
             print(f"Final running standard deviation for Class {class_idx}: {std_acc[-1]:.4f}")
-        print(f'Average standard deviation fo class-level accuracies: {np.mean(std_accs):.4f}')
+        print(f'Standard deviation of class-level standard deviations: {np.std(std_accs):.4f}')
 
         # Customize the plot
-        ax.set_xlabel('Number of Models in the Ensemble', fontsize=16)
-        ax.set_ylabel('Avg Accuracy', fontsize=16)
-        ax.tick_params(axis='x', labelsize=12)
-        ax.tick_params(axis='y', labelsize=12)
+        ax.set_xlabel('Number of Models in the Ensemble', fontsize=20)
+        ax.set_ylabel('Avg Accuracy', fontsize=20)
+        ax.tick_params(axis='x', labelsize=16)
+        ax.tick_params(axis='y', labelsize=16)
         ax.set_xlim(1, running_avg_class_accuracies.shape[0])
 
         plt.tight_layout()

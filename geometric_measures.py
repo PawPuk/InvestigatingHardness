@@ -18,7 +18,7 @@ class Curvature:
         self.data_indices = data_indices
         self.k = k
         self.pca_components = pca_components
-        # TODO: What pca_components do Ma et al. use? Rerun for latent spaces to verify correctness (same results)
+        # TODO: What pca_components do Ma et al. use?
 
     @staticmethod
     def compute_hessian(coords):
@@ -60,13 +60,13 @@ class Curvature:
 
 
 class Proximity:
-    def __init__(self, loader: DataLoader, k: int):
+    def __init__(self, loader: DataLoader, class_loaders: List[DataLoader], k: int):
         """Initialize with the data loader and set K for KNN."""
         self.loader = loader
         self.k = k
+        self.class_loaders = class_loaders
         self.centroids = self.compute_centroids()
         self.samples, self.labels = self.collect_samples()
-        # TODO: For CIFAR10 change to greyscale and see if it has positive effect on correlations
 
     def compute_centroids(self):
         """Compute the centroids for each class."""
@@ -107,23 +107,17 @@ class Proximity:
     def compute_proximity_metrics(self):
         """Compute proximity metrics for each sample, processing data in batches to match Code B."""
 
-        same_centroid_dists = []
+        same_centroid_dists, closest_same_class_distances, avg_same_class_distances = [], [], []
+
         other_centroid_dists = []
-        centroid_ratios = []
-
-        closest_same_class_distances = []
         closest_other_class_distances = []
-        closest_distance_ratios = []
-
-        avg_same_class_distances = []
         avg_other_class_distances = []
-        avg_all_class_distances = []
-        avg_distance_ratios = []
-
-        percentage_same_class_knn = []
         percentage_other_class_knn = []
-
         adapted_N3 = []
+
+        centroid_ratios, closest_distance_ratios, avg_distance_ratios = [], [], []
+
+        avg_all_class_distances = []
 
         # Prepare KNN classifier
         flattened_samples = self.samples.view(self.samples.size(0), -1).cpu().numpy()
@@ -213,13 +207,10 @@ class Proximity:
                 avg_distance_ratios.append(avg_same_dist / avg_other_dist)
 
                 # Compute the percentage of kNN samples from same and other classes
-                num_same_class = knn_same_class_indices.sum()
                 num_other_class = knn_other_class_indices.sum()
                 if effective_k > 0:
-                    percentage_same_class_knn.append(num_same_class / effective_k)
                     percentage_other_class_knn.append(num_other_class / effective_k)
                 else:
-                    percentage_same_class_knn.append(0)
                     percentage_other_class_knn.append(0)
 
                 # Adapted N3 computation per sample
@@ -232,19 +223,182 @@ class Proximity:
 
         return (
             same_centroid_dists, closest_same_class_distances, avg_same_class_distances,  # Type 1
-            other_centroid_dists, closest_other_class_distances, avg_other_class_distances, percentage_same_class_knn,
+            other_centroid_dists, closest_other_class_distances, avg_other_class_distances, percentage_other_class_knn,
             adapted_N3,  # Type 2
             centroid_ratios, closest_distance_ratios, avg_distance_ratios,  # Type 3
             avg_all_class_distances  # Type 4
         )
 
+    """def find_neighbors_with_expansion(self, knn, labels_np, sample_flat, target_label, max_neighbors=10000):
+        current_k = self.k
+        found_same_class = False
+        found_other_class = False
+        min_same_class_dist = float('inf')
+        min_other_class_dist = float('inf')
+
+        while current_k <= max_neighbors and (not found_same_class or not found_other_class):
+            # Dynamically expand kNN search
+            knn.set_params(n_neighbors=current_k)
+            distances, indices = knn.kneighbors([sample_flat])
+
+            knn_dist = distances[0][1:]  # Exclude the sample itself
+            knn_indices = indices[0][1:]
+            knn_labels = labels_np[knn_indices]
+
+            # Check for same and other class distances
+            same_class_indices = knn_labels == target_label
+            other_class_indices = knn_labels != target_label
+
+            same_class_dists = knn_dist[same_class_indices]
+            other_class_dists = knn_dist[other_class_indices]
+
+            if same_class_dists.size > 0:
+                found_same_class = True
+                min_same_class_dist = np.min(same_class_dists)
+
+            if other_class_dists.size > 0:
+                found_other_class = True
+                min_other_class_dist = np.min(other_class_dists)
+
+            current_k += 100  # Expand by 100 neighbors at a time
+        knn.set_params(n_neighbors=self.k)
+        return min_same_class_dist, min_other_class_dist
+
+    def compute_proximity_metrics(self):
+
+        num_samples = self.samples.size(0)
+        batch_size = 1000  # Adjust batch size as needed
+
+        # Pre-allocate result arrays with the same size as the number of samples
+        same_centroid_dists = np.zeros(num_samples)
+        closest_same_class_distances = np.zeros(num_samples)
+        avg_same_class_distances = np.zeros(num_samples)
+        other_centroid_dists = np.zeros(num_samples)
+        closest_other_class_distances = np.zeros(num_samples)
+        avg_other_class_distances = np.zeros(num_samples)
+        percentage_other_class_knn = np.zeros(num_samples)
+        adapted_N3 = np.zeros(num_samples)
+        centroid_ratios = np.zeros(num_samples)
+        closest_distance_ratios = np.zeros(num_samples)
+        avg_distance_ratios = np.zeros(num_samples)
+        avg_all_class_distances = np.zeros(num_samples)
+
+        # Prepare KNN classifier for the entire dataset
+        flattened_samples = self.samples.view(self.samples.size(0), -1).cpu().numpy()
+        labels_np = self.labels.cpu().numpy()
+        knn_full = NearestNeighbors(n_neighbors=self.k)
+        knn_full.fit(flattened_samples)
+
+        # Create KNN classifiers for each class using self.class_loaders
+        knn_class_models = {}
+        for class_idx, class_loader in enumerate(self.class_loaders):
+            class_samples, _ = next(iter(class_loader))
+            class_samples_flat = class_samples.view(class_samples.size(0), -1).cpu().numpy()
+            knn_class_models[class_idx] = NearestNeighbors(n_neighbors=self.k)
+            knn_class_models[class_idx].fit(class_samples_flat)
+
+        for start_idx in tqdm(range(0, num_samples, batch_size),
+                              desc='Computing sample-level proximity metrics'):
+            end_idx = min(start_idx + batch_size, num_samples)
+            batch_samples = self.samples[start_idx:end_idx]
+            batch_targets = self.labels[start_idx:end_idx]
+            batch_samples_flat = batch_samples.view(batch_samples.size(0), -1).cpu().numpy()
+            batch_targets_np = batch_targets.cpu().numpy()
+
+            # Process Same-Class Neighbors in Batches
+            for class_idx in np.unique(batch_targets_np):
+                class_mask = batch_targets_np == class_idx
+                class_samples = batch_samples_flat[class_mask]
+                batch_indices = np.where(class_mask)[0]  # Get the indices of samples in the current batch
+                if len(class_samples) > 0:
+                    # Get the k-NN for the batch of same-class samples
+                    same_class_knn = knn_class_models[class_idx]
+                    same_class_distances, _ = same_class_knn.kneighbors(class_samples)
+                    min_same_class_dists = np.min(same_class_distances[:, 1:], axis=1)  # Exclude the sample itself
+                    avg_same_class_dists = np.mean(same_class_distances[:, 1:], axis=1)
+                    # Store results in the correct indices for same-class metrics
+                    closest_same_class_distances[start_idx + batch_indices] = min_same_class_dists
+                    avg_same_class_distances[start_idx + batch_indices] = avg_same_class_dists
+
+            # Process Other-Class Neighbors in Batches
+            for class_idx in np.unique(batch_targets_np):
+                class_mask = batch_targets_np == class_idx
+                class_samples = batch_samples_flat[class_mask]
+                batch_indices = np.where(class_mask)[0]  # Get the indices of samples in the current batch
+                other_class_dists = []
+                if len(class_samples) > 0:
+                    for other_class_idx in knn_class_models:
+                        if other_class_idx != class_idx:
+                            other_class_knn = knn_class_models[other_class_idx]
+                            other_class_distances, _ = other_class_knn.kneighbors(class_samples)
+                            other_class_dists.append(other_class_distances)
+                    # Stack distances from other classes and compute the closest
+                    other_class_dists = np.hstack(other_class_dists)
+                    min_other_class_dists = np.min(other_class_dists, axis=1)
+                    avg_other_class_dists = np.mean(other_class_dists, axis=1)
+                    # Store results in the correct indices for other-class metrics
+                    closest_other_class_distances[start_idx + batch_indices] = min_other_class_dists
+                    avg_other_class_distances[start_idx + batch_indices] = avg_other_class_dists
+
+            # Compute the Purity (percentage of other-class kNN neighbors)
+            distances, indices = knn_full.kneighbors(batch_samples_flat)
+            for i in range(len(batch_samples)):
+                target = batch_targets_np[i]
+                knn_labels = labels_np[indices[i][1:]]  # Exclude the sample itself
+                # Count how many neighbors belong to a different class
+                other_class_count = np.sum(knn_labels != target)
+                # Compute the percentage of other-class neighbors
+                percentage_other_class_knn[start_idx + i] = other_class_count / (
+                            self.k - 1)  # Exclude the sample itself
+
+            # Centroid distances and ratios for the batch
+            for i in range(len(batch_samples)):
+                target = batch_targets_np[i]
+                sample = batch_samples[i]
+
+                same_class_centroid = self.centroids[target]
+                min_other_class_dist_centroid = float('inf')
+                same_centroid_dist = torch.norm(sample - same_class_centroid).item()
+
+                for cls, centroid in self.centroids.items():
+                    if cls != target:
+                        dist = torch.norm(sample - centroid).item()
+                        if dist < min_other_class_dist_centroid:
+                            min_other_class_dist_centroid = dist
+
+                centroid_ratio = same_centroid_dist / min_other_class_dist_centroid
+                centroid_ratios[start_idx + i] = centroid_ratio
+                same_centroid_dists[start_idx + i] = same_centroid_dist
+                other_centroid_dists[start_idx + i] = min_other_class_dist_centroid
+
+                # Proximity metrics
+                closest_distance_ratios[start_idx + i] = closest_same_class_distances[start_idx + i] / \
+                                                         closest_other_class_distances[start_idx + i]
+                avg_distance_ratios[start_idx + i] = avg_same_class_distances[start_idx + i] / \
+                                                     avg_other_class_distances[start_idx + i]
+                avg_all_class_distances[start_idx + i] = (avg_same_class_distances[start_idx + i] +
+                                                          avg_other_class_distances[start_idx + i]) / 2
+
+                # Adapted N3 computation per sample
+                adapted_N3[start_idx + i] = int(
+                    closest_other_class_distances[start_idx + i] < closest_same_class_distances[start_idx + i])
+
+        return (
+            same_centroid_dists, closest_same_class_distances, avg_same_class_distances,  # Type 1
+            other_centroid_dists, closest_other_class_distances, avg_other_class_distances, percentage_other_class_knn,
+            adapted_N3,  # Type 2
+            centroid_ratios, closest_distance_ratios, avg_distance_ratios,  # Type 3
+            avg_all_class_distances  # Type 4
+        )"""
+
 
 class ModelBasedMetrics:
-    def __init__(self, dataset_name, training, data, labels):
+    def __init__(self, dataset_name, training, data, labels, ensemble_size):
         self.dataset_name = dataset_name
         self.training = training
         self.data = data.to(u.DEVICE)
         self.labels = labels
+        self.ensemble_size = ensemble_size
 
     def compute_model_based_hardness(self, model_type):
         """Compute hardness metrics (Confident Learning, EL2N, VoG, and Margin) using pretrained models."""
@@ -257,7 +411,10 @@ class ModelBasedMetrics:
             model.load_state_dict(torch.load(model_path, map_location=u.DEVICE))
             model.eval()
             models.append(model)
-        models = models[:10] if self.dataset_name == 'CIFAR10' else models[:50]
+        if self.ensemble_size == 'small':
+            models = models[:10] if self.dataset_name == 'CIFAR10' else models[:50]
+        else:
+            models = models[:25] if self.dataset_name == 'CIFAR10' else models[:250]
         print(f'Extracting hard and easy samples with model-based approaches over {len(models)} models.')
 
         # Prepare to store results for each sample
@@ -287,9 +444,9 @@ class ModelBasedMetrics:
         for idx, (pred, label) in enumerate(zip(avg_predictions, self.labels)):
             true_label_vec = np.zeros_like(pred)
             true_label_vec[label] = 1
-            el2n_scores.append(np.linalg.norm(true_label_vec - pred))
+            el2n_scores.append(np.linalg.norm(pred - true_label_vec))
 
-        # Compute VoG (Variance of Gradients) Scores
+        """# Compute VoG (Variance of Gradients) Scores
         for i in tqdm(range(self.data.size(0))):
             gradients = []
             for model in models:
@@ -300,7 +457,7 @@ class ModelBasedMetrics:
                 grad = model.parameters()
                 grad_values = np.concatenate([param.grad.cpu().numpy().flatten() for param in grad])
                 gradients.append(grad_values)
-            vog_scores.append(np.var(gradients))
+            vog_scores.append(np.var(gradients))"""
 
         # Compute Margin (Similar to AUM but for a single model)
         for idx, logits in enumerate(avg_logits):
@@ -312,6 +469,6 @@ class ModelBasedMetrics:
                 margin = correct_logit - sorted_logits[-1]  # Margin between correct and highest logit
             margin_scores.append(margin)
 
-        model_based_hardness_metrics = (cl_scores, el2n_scores, vog_scores, margin_scores)
+        model_based_hardness_metrics = (cl_scores, el2n_scores, margin_scores)
         # Return all computed metrics
         return model_based_hardness_metrics
