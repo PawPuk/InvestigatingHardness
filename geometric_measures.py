@@ -14,14 +14,14 @@ import utils as u
 
 class Curvature:
     def __init__(self, data, data_indices, k, pca_components=8):
-        self.data = data.reshape(data.shape[0], -1)  # Flatten the images (required for image datasets)
-        self.data_indices = data_indices
+        self.data = data  # Training data, flattened
+        self.data_indices = data_indices  # Indices corresponding to training data
         self.k = k
         self.pca_components = pca_components
-        # TODO: What pca_components do Ma et al. use?
 
     @staticmethod
     def compute_hessian(coords):
+        """Compute the Hessian matrix for the curvature estimation."""
         n = coords.shape[1]
         G = np.dot(coords.T, coords)
         H = np.zeros((n, n))
@@ -33,46 +33,47 @@ class Curvature:
                     H[i, j] = np.mean((G[:, i] - np.mean(G[:, i])) * (G[:, j] - np.mean(G[:, j])))
         return H
 
-    def estimate_curvatures(self, gaussian_curvatures, mean_curvatures):
+    def estimate_curvatures_for_test(self, test_data, gaussian_curvatures, mean_curvatures, test_idx_offset):
+        """Estimate curvatures for test samples using nearest neighbors from training data."""
         nn = NearestNeighbors(n_neighbors=self.k)
-        nn.fit(self.data)
-        distances, indices = nn.kneighbors(self.data)
+        nn.fit(self.data)  # Fit the kNN model using the training data
+        distances, indices = nn.kneighbors(test_data)  # Find neighbors for each test sample
 
         for i, point_neighbors in enumerate(indices):
-            point = self.data[i]
-            neighbors = self.data[point_neighbors[1:]]  # Exclude the point itself
-            pca = PCA(n_components=min(self.pca_components, self.data.shape[1]))  # Reduce to specified dimensions
+            point = test_data[i]
+            neighbors = self.data[point_neighbors[1:]]  # Exclude the test point itself, use training data neighbors
+            pca = PCA(n_components=min(self.pca_components, self.data.shape[1]))  # Apply PCA to neighbors
             pca.fit(neighbors - point)
             coords = pca.transform(neighbors - point)
-            H = self.compute_hessian(coords)
+            H = self.compute_hessian(coords)  # Compute the Hessian matrix
             eigenvalues = np.linalg.eigvals(H)
+
             if len(eigenvalues) >= 2:
                 k1, k2 = eigenvalues[:2]
                 gaussian_curvature = k1 * k2  # Gaussian curvature is the product of the principal curvatures
                 mean_curvature = (k1 + k2) / 2  # Mean curvature is the average of the principal curvatures
-                # The below is to make sure we do not override the data (sanity check)
-                if gaussian_curvatures[self.data_indices[i]] is not None:
-                    raise Exception
-                if mean_curvatures[self.data_indices[i]] is not None:
-                    raise Exception
-                gaussian_curvatures[self.data_indices[i]] = gaussian_curvature
-                mean_curvatures[self.data_indices[i]] = mean_curvature
+
+                # Store the results in the correct test index
+                gaussian_curvatures[test_idx_offset + i] = gaussian_curvature
+                mean_curvatures[test_idx_offset + i] = mean_curvature
 
 
 class Proximity:
-    def __init__(self, loader: DataLoader, class_loaders: List[DataLoader], k: int):
+    def __init__(self, training_loader: DataLoader, test_loader: DataLoader, class_loaders: List[DataLoader], k: int):
         """Initialize with the data loader and set K for KNN."""
-        self.loader = loader
+        self.training_loader = training_loader
+        self.test_loader = test_loader
         self.k = k
         self.class_loaders = class_loaders
         self.centroids = self.compute_centroids()
-        self.samples, self.labels = self.collect_samples()
+        self.training_samples, self.training_labels = self.collect_samples(training_loader)
+        self.test_samples, self.test_labels = self.collect_samples(test_loader)
 
     def compute_centroids(self):
         """Compute the centroids for each class."""
         centroids, class_counts = {}, {}
 
-        for data, targets in self.loader:
+        for data, targets in self.training_loader:
             data, targets = data.to(u.DEVICE), targets.to(u.DEVICE)
             unique_classes = torch.unique(targets)
 
@@ -93,11 +94,12 @@ class Proximity:
 
         return centroids
 
-    def collect_samples(self):
+    @staticmethod
+    def collect_samples(loader):
         """Collect all samples and their corresponding labels from the loader."""
         samples = []
         labels = []
-        for data, targets in self.loader:
+        for data, targets in loader:
             samples.append(data.to(u.DEVICE))
             labels.append(targets.to(u.DEVICE))
         samples = torch.cat(samples)
@@ -105,7 +107,7 @@ class Proximity:
         return samples, labels
 
     def compute_proximity_metrics(self):
-        """Compute proximity metrics for each sample, processing data in batches to match Code B."""
+        """Compute proximity metrics for each test sample using training data and precomputed centroids."""
 
         same_centroid_dists, closest_same_class_distances, avg_same_class_distances = [], [], []
 
@@ -119,24 +121,25 @@ class Proximity:
 
         avg_all_class_distances = []
 
-        # Prepare KNN classifier
-        flattened_samples = self.samples.view(self.samples.size(0), -1).cpu().numpy()
-        labels_np = self.labels.cpu().numpy()
+        # Prepare KNN classifier using only the training data
+        flattened_train_samples = self.training_samples.view(self.training_samples.size(0), -1).cpu().numpy()
+        train_labels_np = self.training_labels.cpu().numpy()
         knn = NearestNeighbors(n_neighbors=self.k)
-        knn.fit(flattened_samples)
+        knn.fit(flattened_train_samples)
 
-        num_samples = self.samples.size(0)
+        # Process the test samples batch-wise
+        num_test_samples = self.test_samples.size(0)
         batch_size = 1000  # Adjust batch size as needed
 
-        for start_idx in tqdm(range(0, num_samples, batch_size),
-                              desc='Computing sample-level proximity metrics'):
-            end_idx = min(start_idx + batch_size, num_samples)
-            batch_samples = self.samples[start_idx:end_idx]
-            batch_targets = self.labels[start_idx:end_idx]
+        for start_idx in tqdm(range(0, num_test_samples, batch_size),
+                              desc='Computing proximity metrics for test samples'):
+            end_idx = min(start_idx + batch_size, num_test_samples)
+            batch_samples = self.test_samples[start_idx:end_idx]
+            batch_targets = self.test_labels[start_idx:end_idx]
             batch_samples_flat = batch_samples.view(batch_samples.size(0), -1).cpu().numpy()
             batch_targets_np = batch_targets.cpu().numpy()
 
-            # Centroid distances for the batch
+            # Centroid distances for the batch (computed for each test sample)
             for sample, target in zip(batch_samples, batch_targets):
                 same_class_centroid = self.centroids[target.item()]
                 min_other_class_dist = float('inf')
@@ -153,13 +156,13 @@ class Proximity:
                 other_centroid_dists.append(min_other_class_dist)
                 same_centroid_dists.append(same_centroid_dist)
 
-            # KNN computations for the batch
+            # KNN computations for the batch (only comparing test samples to training samples)
             distances, indices = knn.kneighbors(batch_samples_flat)
             distances = distances[:, 1:]  # Exclude the sample itself
             indices = indices[:, 1:]
 
             knn_distances = distances
-            knn_labels = labels_np[indices]
+            knn_labels = train_labels_np[indices]
             effective_k = self.k - 1  # Since we excluded the sample itself
 
             for i in range(len(batch_samples)):

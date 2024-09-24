@@ -35,14 +35,14 @@ def detect_family(normalized_metric: np.ndarray, avg_gradients: List[np.ndarray]
 def is_first_family_metric(avg_gradients: List[np.ndarray]) -> bool:
     """Check if the metric belongs to the first family."""
     # Check if the rightmost gradients are larger than the leftmost ones
-    condition1 = True if np.mean(avg_gradients[-100:]) > np.mean(avg_gradients[:100]) else False
+    condition1 = True if np.mean(avg_gradients[-10:]) > np.mean(avg_gradients[:10]) else False
     # Check if the leftmost gradients are higher than average gradient
-    condition2 = True if np.mean(avg_gradients[:100]) > np.mean(avg_gradients) else False
+    condition2 = True if np.mean(avg_gradients[:10]) > np.mean(avg_gradients) else False
     # Check if the rightmost gradients are higher than average gradient
-    condition3 = True if np.mean(avg_gradients[-100:]) > np.mean(avg_gradients) else False
+    condition3 = True if np.mean(avg_gradients[-10:]) > np.mean(avg_gradients) else False
     # Check if the leftmost gradients are higher than the threshold
     threshold = 0.025 * np.max(avg_gradients)
-    condition4 = True if threshold < np.mean(avg_gradients[:100]) else False
+    condition4 = True if threshold < np.mean(avg_gradients[:10]) else False
     print(condition1, condition2, condition3, condition4)
     return condition1 and condition4
 
@@ -50,19 +50,19 @@ def is_first_family_metric(avg_gradients: List[np.ndarray]) -> bool:
 def is_second_family_metric(normalized_metric: np.ndarray, avg_gradients: List[np.ndarray]) -> int:
     """Check if the metric belongs to the new family based on distribution and gradient."""
     # Check the normalized distribution (left side low, right side high)
-    left_side_distribution = np.mean(normalized_metric[:500])
-    right_side_distribution = np.mean(normalized_metric[-20000:])
+    left_side_distribution = np.mean(normalized_metric[:50])
+    right_side_distribution = np.mean(normalized_metric[-2000:])
 
     # Check the first derivative (left side high, right side low)
-    left_side_gradient = np.mean(avg_gradients[:500])
-    right_side_gradient = np.mean(avg_gradients[-20000:])
+    left_side_gradient = np.mean(avg_gradients[:50])
+    right_side_gradient = np.mean(avg_gradients[-2000:])
     # Check the condition: distribution (left low, right high) and first derivative (left high, right low)
     if left_side_distribution < right_side_distribution and left_side_gradient > right_side_gradient:
         return True
 
 
 def find_division_points_for_first_family(first_derivatives: np.ndarray, percentage: float = 2.5,
-                                          window_size: int = 10000) -> Tuple[int, int]:
+                                          window_size: int = 1000) -> Tuple[int, int]:
     """Find the first and second division points based on the second derivative analysis. U-shaped first derivative"""
     max_value = np.max(first_derivatives)
     min_value = 0 if np.min(first_derivatives) < max_value / 100 else np.min(first_derivatives)
@@ -89,11 +89,11 @@ def find_division_points_for_first_family(first_derivatives: np.ndarray, percent
         print(first_division_point, second_division_point)
         print(left_threshold, right_threshold)
         print(max_value)
-        raise Exception
-    return max(first_division_point, 1000), min(second_division_point, len(first_derivatives) - 1000)
+        return 0, 0
+    return max(first_division_point, 100), min(second_division_point, len(first_derivatives) - 100)
 
 
-def find_division_points_for_second_family(first_derivatives: np.ndarray, window_size: int = 100,
+def find_division_points_for_second_family(first_derivatives: np.ndarray, window_size: int = 10,
                                            percentage: float = 2.5) -> Tuple[int, int]:
     max_value = np.max(first_derivatives)
     min_value = 0 if np.min(first_derivatives) < max_value / 100 else np.min(first_derivatives)
@@ -104,16 +104,16 @@ def find_division_points_for_second_family(first_derivatives: np.ndarray, window
         if np.all(window > threshold_value):
             return i, i
     print('b' * 25)
-    return 1000, 1000
+    return 100, 100
 
 
-def find_division_points_for_third_family(first_derivatives: np.ndarray, window_size: int = 100,
+def find_division_points_for_third_family(first_derivatives: np.ndarray, window_size: int = 10,
                                           percentage: float = 2.5) -> Tuple[int, int]:
 
-    if np.mean(first_derivatives[:100]) == 0:
+    if np.mean(first_derivatives[:10]) == 0:
         start_index = 0  # Start from zero if the first 500 derivatives are zero
     else:
-        start_index = 20000  # Otherwise, start from 20000
+        start_index = 2000  # Otherwise, start from 20000
 
     max_value = np.max(first_derivatives[-window_size:])
     min_value = 0 if np.min(first_derivatives) < max_value / 100 else np.min(first_derivatives)
@@ -125,7 +125,7 @@ def find_division_points_for_third_family(first_derivatives: np.ndarray, window_
         if np.all(window > threshold_value):
             return i, i
     print(start_index, 'c' * 25)
-    return len(first_derivatives) - 1000, len(first_derivatives) - 1000
+    return len(first_derivatives) - 100, len(first_derivatives) - 100
 
 
 def plot_metric_results(metric_idx: int, sorted_normalized_metric: np.ndarray, avg_gradients: List[np.ndarray],
@@ -291,7 +291,7 @@ def extract_extreme_samples_threshold(metrics: List[List[float]], labels: List[i
 
         # Compute average gradient using 1000 points to the left and 1000 to the right
         avg_gradients = []
-        window_size = 1000
+        window_size = 100
         for i in range(window_size, num_samples - window_size):
             start = max(0, i - window_size)
             end = min(num_samples, i + window_size + 1)
@@ -821,7 +821,7 @@ def main(dataset_name: str, model_type: str, ensemble_size: str, grayscale: bool
 
     full_hardness_metrics = full_proximity_metrics + full_curvature_metrics + full_model_metrics
     part_hardness_metrics = part_proximity_metrics + part_curvature_metrics + part_model_metrics
-    full_class_averages = compute_class_averages_of_metrics(full_hardness_metrics, full_training_labels)
+    full_class_averages = compute_class_averages_of_metrics(part_hardness_metrics, part_training_labels)
 
     # Extract the hardest samples for each metric and compute their class distributions
     full_indices, full_distributions = extract_extreme_samples_threshold(full_hardness_metrics, full_training_labels,
