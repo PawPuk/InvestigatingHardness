@@ -187,7 +187,7 @@ def load_data_and_normalize(dataset_name: str, to_grayscale: bool = False,
     test_data = reduce_dimensionality(dataset_name, test_data, apply_pca=apply_pca)
 
     # Normalize the data
-    if apply_pca and dataset_name in ['CIFAR10', 'CIFAR100']:
+    if (apply_pca or to_grayscale) and dataset_name in ['CIFAR10', 'CIFAR100']:
         # Data is flattened to (N, 784) after PCA
         mean = torch.mean(train_data, dim=0)
         std = torch.std(train_data, dim=0) + EPSILON

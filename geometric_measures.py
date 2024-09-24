@@ -412,9 +412,9 @@ class ModelBasedMetrics:
             model.eval()
             models.append(model)
         if self.ensemble_size == 'small':
-            models = models[:10] if self.dataset_name == 'CIFAR10' else models[:50]
+            models = models[:10] if self.dataset_name == 'CIFAR10' else models[:25]
         else:
-            models = models[:25] if self.dataset_name == 'CIFAR10' else models[:250]
+            models = models[:25] if self.dataset_name == 'CIFAR10' else models[:100]
         print(f'Extracting hard and easy samples with model-based approaches over {len(models)} models.')
 
         # Prepare to store results for each sample

@@ -45,7 +45,7 @@ class EnsembleTrainer:
         model_paths = glob(pattern)
         return sorted(model_paths)
 
-    def train_ensemble(self, train_loader: DataLoader, test_loader: DataLoader):
+    def train_ensemble(self, train_loader: DataLoader, test_loader: DataLoader, ensemble_size: str):
         """Train specified number of models and then evaluate all models (including previously trained ones)."""
         if self.training == 'full':
             print('Training an ensemble of networks in full information scenario')
@@ -69,7 +69,10 @@ class EnsembleTrainer:
                            _use_new_zipfile_serialization=False)  # Ensuring backward compatibility
         if self.save_dir == u.MODEL_SAVE_DIR:
             # Collect all trained models
-            total_models = 10 if self.dataset_name == 'CIFAR10' else 25
+            if ensemble_size == 'small':
+                total_models = 10 if self.dataset_name == 'CIFAR10' else 25
+            else:
+                total_models = 25 if self.dataset_name == 'CIFAR10' else 100
             model_paths = self.get_all_trained_model_paths()[:total_models]
             class_accuracies = np.zeros((total_models, num_classes))  # Store class-level accuracies for all models
             total_accuracies = np.zeros(total_models)
@@ -83,7 +86,7 @@ class EnsembleTrainer:
                 total_accuracies[idx] = u.test(model, test_loader) / 100
 
             # Save class accuracies
-            class_accuracies_file = f"{u.METRICS_SAVE_DIR}{self.training}{self.dataset_name}" \
+            class_accuracies_file = f"{u.METRICS_SAVE_DIR}{ensemble_size}_{self.training}{self.dataset_name}" \
                                     f"_avg_class_accuracies_on_{self.model_type}ensemble.pkl"
             u.save_data(class_accuracies, class_accuracies_file)
 
@@ -91,10 +94,10 @@ class EnsembleTrainer:
             running_avg_class_accuracies = np.array([class_accuracies[:i+1].mean(axis=0) for i in range(total_models)])
             running_std_class_accuracies = np.array([class_accuracies[:i+1].std(axis=0) for i in range(total_models)])
             self.plot_class_accuracies(running_avg_class_accuracies, running_std_class_accuracies, total_accuracies,
-                                       num_classes)
+                                       num_classes, ensemble_size)
 
     def plot_class_accuracies(self, running_avg_class_accuracies, running_std_class_accuracies,
-                              total_accuracies, num_classes):
+                              total_accuracies, num_classes, ensemble_size):
         """Plot how the average accuracy of each class changes as we increase the number of models."""
 
         fig, ax = plt.subplots(figsize=(10, 6))  # Single figure for all class accuracies
@@ -124,7 +127,7 @@ class EnsembleTrainer:
         plt.tight_layout()
 
         # Save and show the plot
-        plt.savefig(f'{u.CLASS_BIAS_SAVE_DIR}{self.training}{self.dataset_name}_class_bias_on_'
+        plt.savefig(f'{u.CLASS_BIAS_SAVE_DIR}{ensemble_size}_{self.training}{self.dataset_name}_class_bias_on_'
                     f'{self.model_type}ensemble.pdf')
         plt.show()
 
@@ -133,7 +136,7 @@ class EnsembleTrainer:
         print(f"Final running standard deviation for total accuracy: {total_accuracies_final_std:.4f}")
 
 
-def main(dataset_name: str, models_count: int, training: str, model_type: str):
+def main(dataset_name: str, models_count: int, training: str, model_type: str, ensemble_size: str):
     trainer = EnsembleTrainer(dataset_name, models_count, True, training, model_type)
     if training == 'full':  # 'full information' scenario
         train_dataset = u.load_full_data_and_normalize(dataset_name)
@@ -142,7 +145,7 @@ def main(dataset_name: str, models_count: int, training: str, model_type: str):
         train_dataset, test_dataset = u.load_data_and_normalize(dataset_name)
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=1000, shuffle=False)
-    trainer.train_ensemble(train_loader, test_loader)
+    trainer.train_ensemble(train_loader, test_loader, ensemble_size)
 
 
 if __name__ == '__main__':
@@ -154,5 +157,7 @@ if __name__ == '__main__':
                              ' (full), or the ones trained only on the training set (part).')
     parser.add_argument('--model_type', type=str, choices=['simple', 'complex'],
                         help='Specifies the type of network used for training (MLP vs LeNet or ResNet20 vs ResNet56).')
+    parser.add_argument('--ensemble_size', type=str, choices=['small', 'large'], default='small',
+                        help='Specifies the size of the ensembles to be used in the experiments.')
     args = parser.parse_args()
     main(**vars(args))

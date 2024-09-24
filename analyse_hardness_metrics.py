@@ -132,7 +132,58 @@ def plot_metric_results(metric_idx: int, sorted_normalized_metric: np.ndarray, a
                         first_division_point: int, second_division_point: int, dataset_name: str, invert: bool,
                         hard_threshold_percent: float, training: str, model_type: str, abbreviations: List[str]):
     """Plot the results with division points marked and areas colored as easy, medium, and hard, along with hard
-    thresholds."""
+    thresholds. Only the metric values are plotted."""
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    num_samples = len(sorted_normalized_metric)
+
+    # Plot sorted normalized metric
+    ax.plot(sorted_normalized_metric, linestyle='-', linewidth=5)
+
+    # Define the regions (easy, medium, hard)
+    if first_division_point is not None and second_division_point is not None:
+        if first_division_point != second_division_point:
+            # Color the medium region (between first and second division points) blue
+            ax.axvspan(first_division_point, second_division_point, facecolor='blue', alpha=0.3)
+
+        # Color the easy and hard regions based on the invert flag
+        if invert:
+            # If invert is True, left is hard (red), right is easy (green)
+            ax.axvspan(0, first_division_point, facecolor='red', alpha=0.3)
+            ax.axvspan(second_division_point, len(sorted_normalized_metric), facecolor='green', alpha=0.3, label='Easy')
+        else:
+            # If invert is False, left is easy (green), right is hard (red)
+            ax.axvspan(0, first_division_point, facecolor='green', alpha=0.3)
+            ax.axvspan(second_division_point, len(sorted_normalized_metric), facecolor='red', alpha=0.3, label='Hard')
+
+    # Add division lines for adaptive (soft) thresholds
+    if first_division_point is not None:
+        ax.axvline(x=first_division_point, color='blue', linestyle='--')
+    if second_division_point is not None:
+        ax.axvline(x=second_division_point, color='blue', linestyle='--')
+
+    ax.set_xlim(0, num_samples)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_visible(True)
+    ax.spines['bottom'].set_visible(True)
+
+    ax.grid(False)
+
+    # Save plot
+    output_dir = 'metric_plots'
+    os.makedirs(output_dir, exist_ok=True)
+    plt.savefig(os.path.join(output_dir, f'{training}{model_type}{dataset_name}_metric_{metric_idx + 1}_'
+                                         f'distribution.pdf'))
+
+    plt.close()
+
+
+"""def plot_metric_results(metric_idx: int, sorted_normalized_metric: np.ndarray, avg_gradients: List[np.ndarray],
+                        first_division_point: int, second_division_point: int, dataset_name: str, invert: bool,
+                        hard_threshold_percent: float, training: str, model_type: str, abbreviations: List[str]):
     fig, axes = plt.subplots(1, 2, figsize=(10, 6))
 
     num_samples = len(sorted_normalized_metric)
@@ -143,7 +194,7 @@ def plot_metric_results(metric_idx: int, sorted_normalized_metric: np.ndarray, a
     hard_hard_index = num_samples - hard_threshold_count  # This is the first index for the hard threshold
 
     # Plot sorted normalized metric
-    axes[0].plot(sorted_normalized_metric, marker='o', linestyle='-')
+    axes[0].plot(sorted_normalized_metric, linestyle='-', linewidth=5)
 
     # Define the regions (easy, medium, hard)
     if first_division_point is not None and second_division_point is not None:
@@ -178,7 +229,7 @@ def plot_metric_results(metric_idx: int, sorted_normalized_metric: np.ndarray, a
     axes[0].set_ylabel('Normalized Value')
     axes[0].grid(True)
     # Plot average gradient
-    axes[1].plot(avg_gradients, marker='x', linestyle='-', color='r')
+    axes[1].plot(avg_gradients, linestyle='-', color='r')
     if first_division_point is not None:
         axes[1].axvline(x=first_division_point, color='blue', linestyle='--', label='First Division')
     if second_division_point is not None:
@@ -194,11 +245,9 @@ def plot_metric_results(metric_idx: int, sorted_normalized_metric: np.ndarray, a
     output_dir = 'metric_plots'
     os.makedirs(output_dir, exist_ok=True)
     plt.savefig(os.path.join(output_dir, f'{training}{model_type}{dataset_name}_metric_{metric_idx + 1}_'
-                                         f'distribution_gradients_.pdf'))
-    plt.savefig(os.path.join(output_dir, f'{training}{model_type}{dataset_name}_metric_{metric_idx + 1}_'
-                                         f'distribution_gradients_.png'))
+                                         f'distribution_gradients.svg'))
 
-    plt.close()
+    plt.close()"""
 
 
 def extract_extreme_samples_threshold(metrics: List[List[float]], labels: List[int], dataset_name: str, model_type: str,
@@ -400,12 +449,22 @@ def compare_metrics_to_class_accuracies(class_distributions, avg_class_accuracie
 
     colors_spearman = [get_color_spearman(p_val) for p_val in p_values_spearman]
 
-    # Plot PCCs in a bar chart with horizontal lines
+    # Plot PCCs in a bar chart without ticks, labels, and spines
     plt.figure(figsize=(14, 8))
     plt.bar(metric_abbreviations, correlations_pcc, color=colors_pcc)
-    plt.title('PCC Between Metrics and Class-Level Accuracies')
-    plt.ylabel('Pearson Correlation Coefficient (PCC)')
-    plt.xticks(rotation=45, ha='right')
+
+    # Remove axis labels, ticks, and spines
+    plt.gca().set_xticks([])  # Remove x-ticks
+    plt.gca().set_yticks([])  # Remove y-ticks
+    plt.gca().set_xlabel('')  # Remove x-axis label
+    plt.gca().set_ylabel('')  # Remove y-axis label
+    plt.gca().set_title('')   # Remove title
+
+    # Make spines (plot borders) invisible
+    plt.gca().spines['top'].set_visible(False)
+    plt.gca().spines['right'].set_visible(False)
+    plt.gca().spines['left'].set_visible(False)
+    plt.gca().spines['bottom'].set_visible(False)
 
     # Add horizontal lines for better readability
     plt.axhline(0, color='black', linewidth=0.5)
@@ -417,18 +476,29 @@ def compare_metrics_to_class_accuracies(class_distributions, avg_class_accuracie
     plt.axhline(-0.6, color='gray', linestyle='--', linewidth=0.5)
     plt.axhline(0.8, color='gray', linestyle='--', linewidth=0.5)
     plt.axhline(-0.8, color='gray', linestyle='--', linewidth=0.5)
+    plt.ylim(-1, 1)
 
     plt.tight_layout()
 
     plt.savefig(os.path.join(u.CORRELATIONS_SAVE_DIR, pcc_output_filename))
     plt.close()
 
-    # Plot Spearman's correlations in a separate bar chart
+    # Plot Spearman's correlations in a separate bar chart without ticks, labels, and spines
     plt.figure(figsize=(14, 8))
     plt.bar(metric_abbreviations, correlations_spearman, color=colors_spearman)
-    plt.title('Spearman Rank Correlation Between Metrics and Class-Level Accuracies')
-    plt.ylabel('Spearman Rank Correlation Coefficient')
-    plt.xticks(rotation=45, ha='right')
+
+    # Remove axis labels, ticks, and spines
+    plt.gca().set_xticks([])  # Remove x-ticks
+    plt.gca().set_yticks([])  # Remove y-ticks
+    plt.gca().set_xlabel('')  # Remove x-axis label
+    plt.gca().set_ylabel('')  # Remove y-axis label
+    plt.gca().set_title('')   # Remove title
+
+    # Make spines invisible
+    plt.gca().spines['top'].set_visible(False)
+    plt.gca().spines['right'].set_visible(False)
+    plt.gca().spines['left'].set_visible(False)
+    plt.gca().spines['bottom'].set_visible(False)
 
     # Add horizontal lines for better readability
     plt.axhline(0, color='black', linewidth=0.5)
@@ -440,6 +510,7 @@ def compare_metrics_to_class_accuracies(class_distributions, avg_class_accuracie
     plt.axhline(-0.6, color='gray', linestyle='--', linewidth=0.5)
     plt.axhline(0.8, color='gray', linestyle='--', linewidth=0.5)
     plt.axhline(-0.8, color='gray', linestyle='--', linewidth=0.5)
+    plt.ylim(-1, 1)
 
     plt.tight_layout()
 
@@ -686,8 +757,8 @@ def main(dataset_name: str, model_type: str, ensemble_size: str, grayscale: bool
     part_proximity_file = f"{u.METRICS_SAVE_DIR}part{dataset_name}"
     full_curvature_file = f"{u.METRICS_SAVE_DIR}full{dataset_name}"
     part_curvature_file = f"{u.METRICS_SAVE_DIR}part{dataset_name}"
-    full_save_dir = f"{u.DIVISIONS_SAVE_DIR}/full{model_type}{dataset_name}_indices"
-    part_save_dir = f"{u.DIVISIONS_SAVE_DIR}/part{model_type}{dataset_name}_indices"
+    full_save_dir = f"{u.DIVISIONS_SAVE_DIR}/{ensemble_size}_full{model_type}{dataset_name}_indices"
+    part_save_dir = f"{u.DIVISIONS_SAVE_DIR}/{ensemble_size}_part{model_type}{dataset_name}_indices"
     if dataset_name == 'CIFAR10':
         if grayscale:
             full_proximity_file += 'gray'
@@ -714,7 +785,7 @@ def main(dataset_name: str, model_type: str, ensemble_size: str, grayscale: bool
 
     metric_abbreviations = [
         'SameCentroidDist', 'Same1NNDist', 'AvgSame40NNDist',
-        'OtherCentroidDist', 'Other1NNDist', 'AvgOther40NNDist', '40NNPercOther', 'N3',
+        'OtherCentroidDist', 'Other1NNDist', 'AvgOther40NNDist', 'Purity', 'N3',
         'CentroidDistRatio', '1NNRatioDist', 'Avg40NNDistRatio',
         'AvgAll40NNDist',
         'GaussCurv', 'MeanCurv',
@@ -762,46 +833,47 @@ def main(dataset_name: str, model_type: str, ensemble_size: str, grayscale: bool
 
     # Compare the indices obtained via data-based approaches and model-based approaches (use the latter as ground truth)
     visualize_evaluation_results(full_indices[0], metric_abbreviations, dataset_name, grayscale, pca,
-                                 f"{u.HEATMAP_SAVE_DIR}{model_type}_adaptive_easy_full{dataset_name}_")
+                                 f"{u.HEATMAP_SAVE_DIR}{ensemble_size}_{model_type}_adaptive_easy_full{dataset_name}_")
     visualize_evaluation_results(part_indices[0], metric_abbreviations, dataset_name, grayscale, pca,
-                                 f"{u.HEATMAP_SAVE_DIR}{model_type}_adaptive_easy_part{dataset_name}_")
+                                 f"{u.HEATMAP_SAVE_DIR}{ensemble_size}_{model_type}_adaptive_easy_part{dataset_name}_")
     visualize_evaluation_results(full_indices[1], metric_abbreviations, dataset_name, grayscale, pca,
-                                 f"{u.HEATMAP_SAVE_DIR}{model_type}_adaptive_hard_full{dataset_name}_")
+                                 f"{u.HEATMAP_SAVE_DIR}{ensemble_size}_{model_type}_adaptive_hard_full{dataset_name}_")
     visualize_evaluation_results(part_indices[1], metric_abbreviations, dataset_name, grayscale, pca,
-                                 f"{u.HEATMAP_SAVE_DIR}{model_type}_adaptive_hard_part{dataset_name}_")
+                                 f"{u.HEATMAP_SAVE_DIR}{ensemble_size}_{model_type}_adaptive_hard_part{dataset_name}_")
     visualize_evaluation_results(full_indices[2], metric_abbreviations, dataset_name, grayscale, pca,
-                                 f"{u.HEATMAP_SAVE_DIR}{model_type}_fixed_easy_full{dataset_name}_")
+                                 f"{u.HEATMAP_SAVE_DIR}{ensemble_size}_{model_type}_fixed_easy_full{dataset_name}_")
     visualize_evaluation_results(part_indices[2], metric_abbreviations, dataset_name, grayscale, pca,
-                                 f"{u.HEATMAP_SAVE_DIR}{model_type}_fixed_easy_part{dataset_name}_")
+                                 f"{u.HEATMAP_SAVE_DIR}{ensemble_size}_{model_type}_fixed_easy_part{dataset_name}_")
     visualize_evaluation_results(full_indices[3], metric_abbreviations, dataset_name, grayscale, pca,
-                                 f"{u.HEATMAP_SAVE_DIR}{model_type}_fixed_hard_full{dataset_name}_")
+                                 f"{u.HEATMAP_SAVE_DIR}{ensemble_size}_{model_type}_fixed_hard_full{dataset_name}_")
     visualize_evaluation_results(part_indices[3], metric_abbreviations, dataset_name, grayscale, pca,
-                                 f"{u.HEATMAP_SAVE_DIR}{model_type}_fixed_hard_part{dataset_name}_")
+                                 f"{u.HEATMAP_SAVE_DIR}{ensemble_size}_{model_type}_fixed_hard_part{dataset_name}_")
 
     # Measure the correlation between the distributions of hard samples and class-level accuracies
     for training in ['full', 'part']:
         distributions = [full_distributions, part_distributions][training == 'part']
-        accuracies = [full_avg_class_accuracies, part_avg_class_accuracies][training == 'part']
+        # accuracies = [full_avg_class_accuracies, part_avg_class_accuracies][training == 'part']
+        accuracies = full_avg_class_accuracies
         compare_metrics_to_class_accuracies(distributions[0], accuracies, num_classes, metric_abbreviations,
                                             dataset_name, grayscale, pca,
-                                            f'{training}{model_type}{dataset_name}_adaptive_easyPCC',
-                                            f'{training}{model_type}{dataset_name}_adaptive_easySRC')
+                                            f'{ensemble_size}_{model_type}_{training}{dataset_name}_adaptive_easyPCC',
+                                            f'{ensemble_size}_{model_type}_{training}{dataset_name}_adaptive_easySRC')
         compare_metrics_to_class_accuracies(distributions[1], accuracies, num_classes, metric_abbreviations,
                                             dataset_name, grayscale, pca,
-                                            f'{training}{model_type}{dataset_name}_adaptive_hardPCC',
-                                            f'{training}{model_type}{dataset_name}_adaptive_hardSRC')
+                                            f'{ensemble_size}_{model_type}_{training}{dataset_name}_adaptive_hardPCC',
+                                            f'{ensemble_size}_{model_type}_{training}{dataset_name}_adaptive_hardSRC')
         compare_metrics_to_class_accuracies(distributions[2], accuracies, num_classes, metric_abbreviations,
                                             dataset_name, grayscale, pca,
-                                            f'{training}{model_type}{dataset_name}_fixed_easyPCC',
-                                            f'{training}{model_type}{dataset_name}_fixed_easySRC')
+                                            f'{ensemble_size}_{model_type}_{training}{dataset_name}_fixed_easyPCC',
+                                            f'{ensemble_size}_{model_type}_{training}{dataset_name}_fixed_easySRC')
         compare_metrics_to_class_accuracies(distributions[3], accuracies, num_classes, metric_abbreviations,
                                             dataset_name, grayscale, pca,
-                                            f'{training}{model_type}{dataset_name}_fixed_hardPCC',
-                                            f'{training}{model_type}{dataset_name}_fixed_hardSRC')
+                                            f'{ensemble_size}_{model_type}_{training}{dataset_name}_fixed_hardPCC',
+                                            f'{ensemble_size}_{model_type}_{training}{dataset_name}_fixed_hardSRC')
         compare_metrics_to_class_accuracies(full_class_averages, accuracies, num_classes, metric_abbreviations,
                                             dataset_name, grayscale, pca,
-                                            f'{training}{model_type}{dataset_name}_avgPCC',
-                                            f'{training}{model_type}{dataset_name}_avgSRC')
+                                            f'{ensemble_size}_{model_type}_{training}{dataset_name}_avgPCC',
+                                            f'{ensemble_size}_{model_type}_{training}{dataset_name}_avgSRC')
 
     # Measure the ratio of easy:hard samples in the training and test splits proposed by PyTorch
     """print('Computing easy:hard ratios obtained by adaptive threshold in training and test splits proposed by PyTorch.')
@@ -879,7 +951,7 @@ if __name__ == '__main__':
                         help='Name of the dataset (MNIST, CIFAR10, CIFAR100).')
     parser.add_argument('--model_type', type=str, choices=['simple', 'complex'], default='complex',
                         help='Specifies the type of network used for training (MLP vs LeNet or ResNet20 vs ResNet56).')
-    parser.add_argument('--ensemble_size', type=str, choices=['small', 'large'], default='small',
+    parser.add_argument('--ensemble_size', type=str, choices=['small', 'large'], default='large',
                         help='Specifies the size of the ensembles to be used in the experiments.')
     parser.add_argument('--grayscale', action='store_true',
                         help='Raise to use grayscale transformation for CIFAR10 when computing Proximity metrics')
