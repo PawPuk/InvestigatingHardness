@@ -49,7 +49,8 @@ class HardnessImbalanceMeasurer:
 
     def categorize_indices_by_hardness(self) -> Tuple[List[set], List[set], List[set]]:
         # We use full indices as the part indices do not contain information on test samples.
-        indices_dir = f'{u.DIVISIONS_SAVE_DIR}{self.ensemble_size}_full{self.model_type}{self.dataset_name}_indices'
+        indices_dir = f'{u.DIVISIONS_SAVE_DIR}{self.ensemble_size}_{self.training}{self.model_type}' \
+                      f'{self.dataset_name}_indices'
         if self.dataset_name == 'CIFAR10':
             if self.grayscale:
                 indices_dir += 'gray'

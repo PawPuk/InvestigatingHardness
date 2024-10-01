@@ -35,36 +35,51 @@ def divide_by_class(loader: DataLoader) -> Tuple[Dict[int, DataLoader], Dict[int
     return class_loaders, class_indices
 
 
-def compute_curvatures(loader: DataLoader, k1: int):
-    """Compute curvatures for all samples in the loader."""
-    # Determine the total number of samples in the dataset
-    total_samples = sum(len(data) for data, _ in loader)
+def compute_curvatures(training_loader: DataLoader, test_loader: DataLoader, k1: int):
+    """Compute curvatures for test samples using nearest neighbors from the training set."""
+    # Prepare training data for kNN
+    train_data_list, train_labels_list = [], []
+    for data, targets in training_loader:
+        train_data_list.append(data.view(data.size(0), -1))  # Flatten training samples
+        train_labels_list.append(targets)
 
-    # Initialize final curvature lists with None values to ensure correct indexing
-    gaussian_curvatures = [None] * total_samples
-    mean_curvatures = [None] * total_samples
+    train_data = torch.cat(train_data_list).cpu().numpy()
 
-    # Divide the loader by class
-    class_loaders, class_indices = divide_by_class(loader)
+    # Initialize final curvature lists for the test data
+    total_test_samples = sum(len(data) for data, _ in test_loader)
+    gaussian_curvatures = [None] * total_test_samples
+    mean_curvatures = [None] * total_test_samples
 
-    for cls, class_loader in tqdm(class_loaders.items(), desc='Iterating through classes.'):
-        for data, _ in class_loader:
-            data.to(u.DEVICE)
-            Curvature(data, class_indices[cls], k=k1).estimate_curvatures(gaussian_curvatures, mean_curvatures)
+    # Process the test data in batches
+    test_idx_offset = 0
+    for data, _ in tqdm(test_loader, desc="Computing curvatures for test samples"):
+        data_flat = data.view(data.size(0), -1).cpu().numpy()  # Flatten test samples
+        num_test_samples = data_flat.shape[0]
+
+        # Estimate curvatures using training data for neighbors
+        Curvature(train_data, np.arange(len(train_data)), k=k1).estimate_curvatures_for_test(
+            test_data=data_flat,
+            gaussian_curvatures=gaussian_curvatures,
+            mean_curvatures=mean_curvatures,
+            test_idx_offset=test_idx_offset
+        )
+
+        test_idx_offset += num_test_samples
 
     return gaussian_curvatures, mean_curvatures
 
 
-def compute_proximity_metrics(loader: DataLoader, k2: int, class_loaders: List[DataLoader]):
+def compute_proximity_metrics(training_loader: DataLoader, test_loader: DataLoader, k2: int,
+                              class_loaders: List[DataLoader]):
     """Compute the geometric metrics of the data that can be used to identify hard samples, class-wise."""
-    proximity = Proximity(loader, class_loaders, k=k2)
+    proximity = Proximity(training_loader, test_loader, class_loaders, k=k2)
     proximity_metrics = proximity.compute_proximity_metrics()
     return proximity_metrics
 
 
-def compute_model_based_metrics(dataset_name: str, training: str, training_dataset: TensorDataset, ensemble_size: str):
-    data = training_dataset.tensors[0]
-    labels = training_dataset.tensors[1].numpy()
+def compute_model_based_metrics(dataset_name: str, training: str, dataset: TensorDataset, ensemble_size: str):
+    data = dataset.tensors[0]
+    labels = dataset.tensors[1].numpy()
     modelBasedMetrics = ModelBasedMetrics(dataset_name, training, data, labels, ensemble_size)
     complex_metrics = modelBasedMetrics.compute_model_based_hardness('complex')
     simple_metrics = modelBasedMetrics.compute_model_based_hardness('simple')

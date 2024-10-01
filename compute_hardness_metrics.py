@@ -54,38 +54,39 @@ def main(dataset_name: str, training: str, k2: int, ensemble_size: str, grayscal
     # Load the dataset
     if training == 'full':
         training_dataset = u.load_full_data_and_normalize(dataset_name, to_grayscale=grayscale, apply_pca=pca)
+        test_dataset = training_dataset
     else:
-        training_dataset, _ = u.load_data_and_normalize(dataset_name, to_grayscale=grayscale, apply_pca=pca)
+        training_dataset, test_dataset = u.load_data_and_normalize(dataset_name, to_grayscale=grayscale, apply_pca=pca)
 
     class_loaders = create_class_loaders(training_dataset, batch_size=len(training_dataset), shuffle=False)
-    loader = DataLoader(training_dataset, batch_size=len(training_dataset), shuffle=False)
+    training_loader = DataLoader(training_dataset, batch_size=len(training_dataset), shuffle=False)
+    test_loader = DataLoader(test_dataset, batch_size=len(test_dataset), shuffle=False)
 
     if os.path.exists(proximity_file):
         print(f'Proximities were already computed for {dataset_name}.')
     else:
         print('Calculating proximities.')
-        proximity_metrics = compute_proximity_metrics(loader, k2, class_loaders)
+        proximity_metrics = compute_proximity_metrics(training_loader, test_loader, k2, class_loaders)
         u.save_data(proximity_metrics, proximity_file)
 
     if os.path.exists(curvature_file):
         print(f'Curvatures were already computed for {dataset_name}.')
     else:
         print('Calculating curvatures.')
-        curvature_metrics = compute_curvatures(loader, k2)
+        curvature_metrics = compute_curvatures(training_loader, test_loader, k2)
         u.save_data(curvature_metrics, curvature_file)
 
     if training == 'full':
-        training_dataset = u.load_full_data_and_normalize(dataset_name, to_grayscale=False, apply_pca=False)
+        dataset = u.load_full_data_and_normalize(dataset_name, to_grayscale=False, apply_pca=False)
     else:
-        training_dataset, _ = u.load_data_and_normalize(dataset_name, to_grayscale=False, apply_pca=False)
+        _, dataset = u.load_data_and_normalize(dataset_name, to_grayscale=False, apply_pca=False)
 
     if os.path.exists(model_based_file):
         print(f'Model-based hardness metrics were already computed for {dataset_name}.')
     else:
         print('Computing model-based hardness metrics')
         simple_model_based_metrics, complex_model_based_metrics = compute_model_based_metrics(dataset_name, training,
-                                                                                              training_dataset,
-                                                                                              ensemble_size)
+                                                                                              dataset, ensemble_size)
         u.save_data(simple_model_based_metrics, model_based_file + '_simple_model_based_indicators.pkl')
         u.save_data(complex_model_based_metrics, model_based_file + '_complex_model_based_indicators.pkl')
 
