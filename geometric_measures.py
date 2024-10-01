@@ -12,13 +12,55 @@ from tqdm import tqdm
 import utils as u
 
 
+class Volume:
+    def __init__(self, data):
+        self.data = data
+
+    def calculate_volume(self, d=1.0):
+        # Reshape the data to (N, C * H * W), where each image is flattened into a vector
+        reshaped_data = self.data.reshape(self.data.shape[0], -1)
+        # Calculate the mean of Z (Z_mean), across the dataset
+        Z_mean = np.mean(reshaped_data, axis=0, keepdims=True)
+        # Calculate (Z - Z_mean)
+        diff = reshaped_data - Z_mean
+        # Calculate (Z - Z_mean)(Z - Z_mean)^T, where each image vector is flattened
+        outer_product = np.dot(diff.T, diff)
+        # Scale the outer product
+        scaled_outer_product = (d / reshaped_data.shape[0]) * outer_product
+        # Calculate I + \frac{d}{m}(Z - Z_mean)(Z - Z_mean)^T
+        matrix_sum = np.eye(reshaped_data.shape[1]) + scaled_outer_product
+        # Calculate the volume: \frac{1}{2} \log_2 \det \left( I + \frac{d}{m}(Z - Z_mean)(Z - Z_mean)^T \right)
+        volume = 0.5 * np.log2(np.linalg.det(matrix_sum))
+        density = volume / len(self.data)
+        return volume, density
+
+    def sum_of_eigenvalues(self):
+        reshaped_data = self.data.reshape(self.data.shape[0], -1)
+        # Compute covariance matrix
+        covariance_matrix = np.cov(reshaped_data, rowvar=False)
+        # Compute eigenvalues
+        eigenvalues = np.linalg.eigvalsh(covariance_matrix)
+        # Sum of eigenvalues
+        sum_eigenvalues = np.sum(eigenvalues)
+        return sum_eigenvalues
+
+    def max_eigenvalue(self):
+        reshaped_data = self.data.reshape(self.data.shape[0], -1)
+        # Compute covariance matrix
+        covariance_matrix = np.cov(reshaped_data, rowvar=False)
+        # Compute eigenvalues
+        eigenvalues = np.linalg.eigvalsh(covariance_matrix)
+        # Max eigenvalue
+        max_eigenvalue = np.max(eigenvalues)
+        return max_eigenvalue
+
+
 class Curvature:
     def __init__(self, data, data_indices, k, pca_components=8):
         self.data = data.reshape(data.shape[0], -1)  # Flatten the images (required for image datasets)
         self.data_indices = data_indices
         self.k = k
         self.pca_components = pca_components
-        # TODO: What pca_components do Ma et al. use?
 
     @staticmethod
     def compute_hessian(coords):
@@ -117,8 +159,6 @@ class Proximity:
 
         centroid_ratios, closest_distance_ratios, avg_distance_ratios = [], [], []
 
-        avg_all_class_distances = []
-
         # Prepare KNN classifier
         flattened_samples = self.samples.view(self.samples.size(0), -1).cpu().numpy()
         labels_np = self.labels.cpu().numpy()
@@ -199,11 +239,8 @@ class Proximity:
                 else:
                     avg_other_dist = np.inf
 
-                avg_all_dist = np.mean(knn_dist)
-
                 avg_same_class_distances.append(avg_same_dist)
                 avg_other_class_distances.append(avg_other_dist)
-                avg_all_class_distances.append(avg_all_dist)
                 avg_distance_ratios.append(avg_same_dist / avg_other_dist)
 
                 # Compute the percentage of kNN samples from same and other classes
@@ -222,11 +259,10 @@ class Proximity:
                 adapted_N3.append(n3_different_class)
 
         return (
-            same_centroid_dists, closest_same_class_distances, avg_same_class_distances,  # Type 1
+            same_centroid_dists,  # Type 1
+            closest_same_class_distances, avg_same_class_distances,  # Type 2
             other_centroid_dists, closest_other_class_distances, avg_other_class_distances, percentage_other_class_knn,
-            adapted_N3,  # Type 2
-            centroid_ratios, closest_distance_ratios, avg_distance_ratios,  # Type 3
-            avg_all_class_distances  # Type 4
+            adapted_N3, centroid_ratios, closest_distance_ratios, avg_distance_ratios,  # Type 4
         )
 
     """def find_neighbors_with_expansion(self, knn, labels_np, sample_flat, target_label, max_neighbors=10000):
@@ -421,18 +457,16 @@ class ModelBasedMetrics:
         el2n_scores, vog_scores, margin_scores = [], [], []
 
         # Accumulate predictions and logits for each model
-        all_outputs = []
-        all_logits = []
+        all_outputs, all_logits = [], []
         for model in tqdm(models):
             with torch.no_grad():
-                outputs = model(self.data).cpu().numpy()
-                logits = torch.softmax(model(self.data), dim=1).cpu().numpy()
+                outputs = model(self.data).cpu().numpy()  # Raw logits (not used for EL2N)
+                logits = torch.softmax(model(self.data), dim=1).cpu().numpy()  # Softmax probabilities
                 all_outputs.append(outputs)
                 all_logits.append(logits)
 
         # Average predictions and logits across the ensemble
-        avg_predictions = np.mean(all_outputs, axis=0)
-        avg_logits = np.mean(all_logits, axis=0)
+        avg_logits = np.mean(all_logits, axis=0)  # Averaged softmax probabilities
 
         # Use Cleanlab for Confident Learning Scores
         cl_scores = get_label_quality_scores(
@@ -441,23 +475,11 @@ class ModelBasedMetrics:
         )
 
         # Compute EL2N (Error L2-Norm) Scores
-        for idx, (pred, label) in enumerate(zip(avg_predictions, self.labels)):
-            true_label_vec = np.zeros_like(pred)
+        for idx, (logits, label) in enumerate(zip(avg_logits, self.labels)):
+            # logits are now the softmax probabilities
+            true_label_vec = np.zeros_like(logits)
             true_label_vec[label] = 1
-            el2n_scores.append(np.linalg.norm(pred - true_label_vec))
-
-        """# Compute VoG (Variance of Gradients) Scores
-        for i in tqdm(range(self.data.size(0))):
-            gradients = []
-            for model in models:
-                model.zero_grad()
-                output = model(self.data[i:i + 1])
-                loss = torch.nn.functional.cross_entropy(output, torch.tensor([self.labels[i]]).to(u.DEVICE))
-                loss.backward()
-                grad = model.parameters()
-                grad_values = np.concatenate([param.grad.cpu().numpy().flatten() for param in grad])
-                gradients.append(grad_values)
-            vog_scores.append(np.var(gradients))"""
+            el2n_scores.append(np.linalg.norm(logits - true_label_vec))  # L2 norm in probability space
 
         # Compute Margin (Similar to AUM but for a single model)
         for idx, logits in enumerate(avg_logits):

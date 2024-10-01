@@ -62,7 +62,7 @@ def load_data(filename: str):
 
 
 def initialize_models(dataset_name: str, model_type: str):
-    if dataset_name == 'CIFAR10':
+    if dataset_name in ['CIFAR10', 'SVHN']:
         # Create three instances of each model type with fresh initializations
         if model_type == 'simple':
             model = torch.hub.load("chenyaofo/pytorch-cifar-models", "cifar10_resnet20", pretrained=False).to(DEVICE)
@@ -82,32 +82,32 @@ def calculate_mean_std(accuracies: List[float]) -> Tuple[float, float]:
     return np.mean(accuracies), np.std(accuracies)
 
 
-def reduce_dimensionality(dataset_name: str, data: torch.Tensor, apply_pca: bool = False) -> torch.Tensor:
+def reduce_dimensionality(data: torch.Tensor, apply_pca: bool = False) -> torch.Tensor:
     """
     Optionally reduces the dimensionality of the data to match the data/dimensionality ratio of MNIST if the dataset is
     CIFAR10 or CIFAR100. For other datasets like MNIST, it simply returns the data as is.
 
-    :param dataset_name: Name of the dataset.
     :param data: Data tensor of shape (N, C, H, W).
     :param apply_pca: Whether to apply PCA for dimensionality reduction.
     :return: Data tensor with reduced dimensionality or original data.
     """
-    if apply_pca and dataset_name in ['CIFAR10', 'CIFAR100']:
+    if apply_pca:
         N = data.shape[0]
         # Flatten the data: (N, C, H, W) -> (N, C*H*W)
         data_flat = data.view(N, -1)
-        # Perform PCA to reduce dimensions to 672
-        pca = PCA(n_components=672)
+        original_dim = data_flat.shape[1]  # Get the original number of features
+        reduced_dim = original_dim // 2  # Reduce dimensionality by half
+        # Perform PCA to reduce dimensions by half
+        pca = PCA(n_components=reduced_dim)
         data_reduced = pca.fit_transform(data_flat.numpy())
         # Convert back to tensor
         data_reduced = torch.from_numpy(data_reduced).float()
-        return data_reduced  # Shape: (N, 672)
+        return data_reduced  # Shape: (N, reduced_dim)
     else:
         return data  # Return data as is
 
 
-def load_full_data_and_normalize(dataset_name: str, to_grayscale: bool = False,
-                                 apply_pca: bool = False) -> TensorDataset:
+def load_full_data_and_normalize(dataset_name: str, to_grayscale: bool = False, apply_pca: bool = False) -> TensorDataset:
     """Loads and normalizes the full dataset (train + test). Optionally reduces dimensionality.
 
     :param dataset_name: Name of the dataset to load.
@@ -116,29 +116,39 @@ def load_full_data_and_normalize(dataset_name: str, to_grayscale: bool = False,
     :return: A TensorDataset containing the normalized data and targets.
     """
     # Load the train and test datasets
-    train_dataset = getattr(datasets, dataset_name)(root="./data", train=True, download=True)
-    test_dataset = getattr(datasets, dataset_name)(root="./data", train=False, download=True)
-
-    # Convert datasets into tensors
-    if dataset_name in ['CIFAR10', 'CIFAR100']:
-        train_data = torch.tensor(train_dataset.data).permute(0, 3, 1, 2).float()  # (N, H, W, C) -> (N, C, H, W)
-        test_data = torch.tensor(test_dataset.data).permute(0, 3, 1, 2).float()
-        if to_grayscale and dataset_name == 'CIFAR10':
-            train_data = train_data.mean(dim=1, keepdim=True)  # Convert to single channel
-            test_data = test_data.mean(dim=1, keepdim=True)    # Convert to single channel
+    if dataset_name == 'SVHN':
+        train_dataset = datasets.SVHN(root="./data", split='train', download=True)
+        test_dataset = datasets.SVHN(root="./data", split='test', download=True)
+        train_data = torch.tensor(train_dataset.data).float()
+        test_data = torch.tensor(test_dataset.data).float()
+        train_targets = torch.tensor(train_dataset.labels)
+        test_targets = torch.tensor(test_dataset.labels)
     else:
-        train_data = torch.tensor(train_dataset.data).unsqueeze(1).float()
-        test_data = torch.tensor(test_dataset.data).unsqueeze(1).float()
+        train_dataset = getattr(datasets, dataset_name)(root="./data", train=True, download=True)
+        test_dataset = getattr(datasets, dataset_name)(root="./data", train=False, download=True)
+
+        # Convert datasets into tensors
+        if dataset_name in ['CIFAR10', 'CIFAR100']:
+            train_data = torch.tensor(train_dataset.data).permute(0, 3, 1, 2).float() / 255.0  # Normalize
+            test_data = torch.tensor(test_dataset.data).permute(0, 3, 1, 2).float() / 255.0    # Normalize
+            if to_grayscale and dataset_name == 'CIFAR10':
+                train_data = train_data.mean(dim=1, keepdim=True)  # Convert to grayscale
+                test_data = test_data.mean(dim=1, keepdim=True)
+        else:
+            train_data = torch.tensor(train_dataset.data).unsqueeze(1).float() / 255.0
+            test_data = torch.tensor(test_dataset.data).unsqueeze(1).float() / 255.0
+        train_targets = torch.tensor(train_dataset.targets)
+        test_targets = torch.tensor(test_dataset.targets)
 
     # Concatenate train and test data
     full_data = torch.cat([train_data, test_data], dim=0)
-    full_targets = torch.cat([torch.tensor(train_dataset.targets), torch.tensor(test_dataset.targets)], dim=0)
+    full_targets = torch.cat([train_targets, test_targets], dim=0)
 
     # Reduce dimensionality if necessary
-    full_data = reduce_dimensionality(dataset_name, full_data, apply_pca=apply_pca)
+    full_data = reduce_dimensionality(full_data, apply_pca=apply_pca)
 
     # Normalize the data
-    if apply_pca and dataset_name in ['CIFAR10', 'CIFAR100']:
+    if apply_pca:
         # Data is flattened to (N, 784) after PCA
         mean = torch.mean(full_data, dim=0)
         std = torch.std(full_data, dim=0) + EPSILON
@@ -165,29 +175,35 @@ def load_data_and_normalize(dataset_name: str, to_grayscale: bool = False,
     :return: Two TensorDatasets - one for training data and another for test data.
     """
     # Load the train and test datasets
-    train_dataset = getattr(datasets, dataset_name)(root="./data", train=True, download=True)
-    test_dataset = getattr(datasets, dataset_name)(root="./data", train=False, download=True)
-
-    # Convert datasets into tensors
-    if dataset_name in ['CIFAR10', 'CIFAR100']:
-        train_data = torch.tensor(train_dataset.data).permute(0, 3, 1, 2).float()
-        test_data = torch.tensor(test_dataset.data).permute(0, 3, 1, 2).float()
-        if to_grayscale:
-            train_data = train_data.mean(dim=1, keepdim=True)  # Convert to single channel
-            test_data = test_data.mean(dim=1, keepdim=True)    # Convert to single channel
+    if dataset_name == 'SVHN':
+        train_dataset = datasets.SVHN(root="./data", split='train', download=True)
+        test_dataset = datasets.SVHN(root="./data", split='test', download=True)
+        train_data = torch.tensor(train_dataset.data).float()
+        test_data = torch.tensor(test_dataset.data).float()
+        train_targets = torch.tensor(train_dataset.labels)
+        test_targets = torch.tensor(test_dataset.labels)
     else:
-        train_data = torch.tensor(train_dataset.data).unsqueeze(1).float()
-        test_data = torch.tensor(test_dataset.data).unsqueeze(1).float()
-
-    train_targets = torch.tensor(train_dataset.targets)
-    test_targets = torch.tensor(test_dataset.targets)
+        train_dataset = getattr(datasets, dataset_name)(root="./data", train=True, download=True)
+        test_dataset = getattr(datasets, dataset_name)(root="./data", train=False, download=True)
+        # Convert datasets into tensors
+        if dataset_name in ['CIFAR10', 'CIFAR100', 'SVHN']:
+            train_data = torch.tensor(train_dataset.data).permute(0, 3, 1, 2).float()
+            test_data = torch.tensor(test_dataset.data).permute(0, 3, 1, 2).float()
+            if to_grayscale:
+                train_data = train_data.mean(dim=1, keepdim=True)  # Convert to single channel
+                test_data = test_data.mean(dim=1, keepdim=True)    # Convert to single channel
+        else:
+            train_data = torch.tensor(train_dataset.data).unsqueeze(1).float()
+            test_data = torch.tensor(test_dataset.data).unsqueeze(1).float()
+        train_targets = torch.tensor(train_dataset.targets)
+        test_targets = torch.tensor(test_dataset.targets)
 
     # Reduce dimensionality if necessary
-    train_data = reduce_dimensionality(dataset_name, train_data, apply_pca=apply_pca)
-    test_data = reduce_dimensionality(dataset_name, test_data, apply_pca=apply_pca)
+    train_data = reduce_dimensionality(train_data, apply_pca=apply_pca)
+    test_data = reduce_dimensionality(test_data, apply_pca=apply_pca)
 
     # Normalize the data
-    if (apply_pca or to_grayscale) and dataset_name in ['CIFAR10', 'CIFAR100']:
+    if apply_pca or to_grayscale:
         # Data is flattened to (N, 784) after PCA
         mean = torch.mean(train_data, dim=0)
         std = torch.std(train_data, dim=0) + EPSILON

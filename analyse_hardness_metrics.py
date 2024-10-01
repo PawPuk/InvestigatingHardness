@@ -1,10 +1,8 @@
 import argparse
 from collections import defaultdict
-from glob import glob
 import os
 from typing import List, Tuple
 
-from cleanlab.rank import get_label_quality_scores
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -13,8 +11,8 @@ from scipy.stats import kendalltau, pearsonr, spearmanr
 import seaborn as sns
 from sklearn.metrics import roc_curve, auc
 import torch
-from tqdm import tqdm
 
+from geometric_measures import Volume
 import utils as u
 
 # Set random seeds for reproducibility
@@ -128,9 +126,8 @@ def find_division_points_for_third_family(first_derivatives: np.ndarray, window_
     return len(first_derivatives) - 1000, len(first_derivatives) - 1000
 
 
-def plot_metric_results(metric_idx: int, sorted_normalized_metric: np.ndarray, avg_gradients: List[np.ndarray],
-                        first_division_point: int, second_division_point: int, dataset_name: str, invert: bool,
-                        hard_threshold_percent: float, training: str, model_type: str, abbreviations: List[str]):
+def plot_metric_results(metric_idx: int, sorted_normalized_metric: np.ndarray,  first_division_point: int,
+                        second_division_point: int, dataset_name: str, invert: bool, training: str, model_type: str):
     """Plot the results with division points marked and areas colored as easy, medium, and hard, along with hard
     thresholds. Only the metric values are plotted."""
     fig, ax = plt.subplots(figsize=(8, 6))
@@ -138,14 +135,13 @@ def plot_metric_results(metric_idx: int, sorted_normalized_metric: np.ndarray, a
     num_samples = len(sorted_normalized_metric)
 
     # Plot sorted normalized metric
-    ax.plot(sorted_normalized_metric, linestyle='-', linewidth=5)
+    ax.plot(sorted_normalized_metric, linestyle='-', linewidth=10)
 
     # Define the regions (easy, medium, hard)
     if first_division_point is not None and second_division_point is not None:
         if first_division_point != second_division_point:
             # Color the medium region (between first and second division points) blue
             ax.axvspan(first_division_point, second_division_point, facecolor='blue', alpha=0.3)
-
         # Color the easy and hard regions based on the invert flag
         if invert:
             # If invert is True, left is hard (red), right is easy (green)
@@ -156,12 +152,6 @@ def plot_metric_results(metric_idx: int, sorted_normalized_metric: np.ndarray, a
             ax.axvspan(0, first_division_point, facecolor='green', alpha=0.3)
             ax.axvspan(second_division_point, len(sorted_normalized_metric), facecolor='red', alpha=0.3, label='Hard')
 
-    # Add division lines for adaptive (soft) thresholds
-    if first_division_point is not None:
-        ax.axvline(x=first_division_point, color='blue', linestyle='--')
-    if second_division_point is not None:
-        ax.axvline(x=second_division_point, color='blue', linestyle='--')
-
     ax.set_xlim(0, num_samples)
     ax.set_xticks([])
     ax.set_yticks([])
@@ -169,7 +159,6 @@ def plot_metric_results(metric_idx: int, sorted_normalized_metric: np.ndarray, a
     ax.spines['right'].set_visible(False)
     ax.spines['left'].set_visible(True)
     ax.spines['bottom'].set_visible(True)
-
     ax.grid(False)
 
     # Save plot
@@ -251,8 +240,7 @@ def plot_metric_results(metric_idx: int, sorted_normalized_metric: np.ndarray, a
 
 
 def extract_extreme_samples_threshold(metrics: List[List[float]], labels: List[int], dataset_name: str, model_type: str,
-                                      invert: List[bool], training: str, metric_abbreviations: List[str],
-                                      fixed_threshold_percent: float = 0.15):
+                                      invert: List[bool], training: str, fixed_threshold_percent: float = 0.15):
     """Extract easy and hard samples using both adaptive and hard thresholds, returning their indices and
     distributions."""
     num_metrics = len(metrics)
@@ -364,9 +352,8 @@ def extract_extreme_samples_threshold(metrics: List[List[float]], labels: List[i
         fixed_hard_distributions.append(fixed_hard_dist)
 
         # Plot results and pass hard thresholds to the plotting function
-        plot_metric_results(metric_idx, sorted_normalized_metric, avg_gradients, first_division_point,
-                            second_division_point, dataset_name, invert[metric_idx], fixed_threshold_percent, training,
-                            model_type, metric_abbreviations)
+        plot_metric_results(metric_idx, sorted_normalized_metric, first_division_point, second_division_point,
+                            dataset_name, invert[metric_idx], training, model_type)
 
     return (adaptive_easy_samples, adaptive_hard_samples, fixed_easy_samples, fixed_hard_samples), \
         (adaptive_easy_distributions, adaptive_hard_distributions, fixed_easy_distributions, fixed_hard_distributions)
@@ -784,40 +771,52 @@ def main(dataset_name: str, model_type: str, ensemble_size: str, grayscale: bool
     part_model_file = f"{u.METRICS_SAVE_DIR}{ensemble_size}_part{dataset_name}_{model_type}_model_based_indicators.pkl"
 
     metric_abbreviations = [
-        'SameCentroidDist', 'Same1NNDist', 'AvgSame40NNDist',
-        'OtherCentroidDist', 'Other1NNDist', 'AvgOther40NNDist', 'Purity', 'N3',
-        'CentroidDistRatio', '1NNRatioDist', 'Avg40NNDistRatio',
-        'AvgAll40NNDist',
+        'SameCentroidDist',
+        'Same1NNDist', 'AvgSame40NNDist',
+        'OtherCentroidDist', 'Other1NNDist', 'AvgOther40NNDist', 'Purity', 'N3', 'CentroidDistRatio', '1NNRatioDist',
+        'Avg40NNDistRatio',
         'GaussCurv', 'MeanCurv',
-        'Cleanlab', 'EL2N', 'VoG', 'Margin'
+        'Cleanlab', 'EL2N', 'Margin'
     ]
 
     # Load the dataset and metrics
-    full_training_dataset = u.load_full_data_and_normalize(dataset_name)
+    full_training_dataset = u.load_full_data_and_normalize(dataset_name, to_grayscale=grayscale, apply_pca=pca)
+    full_training_labels = full_training_dataset.tensors[1].numpy()
+    num_classes = len(np.unique(full_training_labels))
+    full_data = full_training_dataset.tensors[0].numpy()
+    full_labels = full_training_dataset.tensors[1].numpy()
+    class_volumes = defaultdict(int)
+    class_sum_eigenvalues = defaultdict(int)
+    class_max_eigenvalues = defaultdict(int)
+
+    for i, class_label in enumerate(range(num_classes)):
+        class_indices = np.where(full_labels == class_label)[0]
+        class_data = full_data[class_indices]
+        volume_obj = Volume(class_data)
+        volume, density = volume_obj.calculate_volume()
+        sum_eigenvalues = volume_obj.sum_of_eigenvalues()
+        max_eigenvalue = volume_obj.max_eigenvalue()
+        class_volumes[i] = volume
+        class_sum_eigenvalues[i] = sum_eigenvalues
+        class_max_eigenvalues[i] = max_eigenvalue
+
     part_training_dataset, _ = u.load_data_and_normalize(dataset_name)
     full_avg_class_accuracies = u.load_data(full_accuracies_file)
     full_avg_class_accuracies = np.sum(full_avg_class_accuracies, axis=0) / len(full_avg_class_accuracies)
     part_avg_class_accuracies = u.load_data(part_accuracies_file)
-    part_avg_class_accuracies = np.sum(part_avg_class_accuracies, axis=0) / len(part_avg_class_accuracies)
     full_proximity_metrics = u.load_data(full_proximity_file)
     part_proximity_metrics = u.load_data(part_proximity_file)
     full_curvature_metrics = u.load_data(full_curvature_file)
     part_curvature_metrics = u.load_data(part_curvature_file)
     full_model_metrics = u.load_data(full_model_file)
     part_model_metrics = u.load_data(part_model_file)
-    full_training_labels = full_training_dataset.tensors[1].numpy()
     part_training_labels = part_training_dataset.tensors[1].numpy()
-    num_classes = len(np.unique(full_training_labels))
 
-    invert_metrics = [False, False, False,  # For metrics measuring intra-class structure
-                      True, True, True, False, False,  # For metrics measuring separation from other classes
-                      False, False, False,  # For radio-based metrics
-                      False,  # For density based-metrics
-                      False, False,  # For curvature-based metrics
-                      True, False, False, True]  # For model-based metrics
-
-    metric_abbreviations.pop(-2)
-    invert_metrics.pop(-2)
+    invert_metrics = [False,   # For type 1 metrics
+                      False, False,  # For type 2 metrics
+                      True, True, True, False, False, False, False, False,  # For type 3 metrics
+                      False, False,  # For type 4 metrics
+                      True, False, True]  # For model-based metrics
 
     full_hardness_metrics = full_proximity_metrics + full_curvature_metrics + full_model_metrics
     part_hardness_metrics = part_proximity_metrics + part_curvature_metrics + part_model_metrics
@@ -826,10 +825,10 @@ def main(dataset_name: str, model_type: str, ensemble_size: str, grayscale: bool
     # Extract the hardest samples for each metric and compute their class distributions
     full_indices, full_distributions = extract_extreme_samples_threshold(full_hardness_metrics, full_training_labels,
                                                                          dataset_name, model_type, invert_metrics,
-                                                                         'full', metric_abbreviations)
+                                                                         'full')
     part_indices, part_distributions = extract_extreme_samples_threshold(part_hardness_metrics, part_training_labels,
                                                                          dataset_name, model_type, invert_metrics,
-                                                                         'part', metric_abbreviations)
+                                                                         'part')
 
     # Compare the indices obtained via data-based approaches and model-based approaches (use the latter as ground truth)
     visualize_evaluation_results(full_indices[0], metric_abbreviations, dataset_name, grayscale, pca,
@@ -849,9 +848,12 @@ def main(dataset_name: str, model_type: str, ensemble_size: str, grayscale: bool
     visualize_evaluation_results(part_indices[3], metric_abbreviations, dataset_name, grayscale, pca,
                                  f"{u.HEATMAP_SAVE_DIR}{ensemble_size}_{model_type}_fixed_hard_part{dataset_name}_")
 
+    metric_abbreviations1 = ['Volume', 'SumEigenvalues', 'MaxEigenvalue'] + metric_abbreviations
+
     # Measure the correlation between the distributions of hard samples and class-level accuracies
     for training in ['full', 'part']:
         distributions = [full_distributions, part_distributions][training == 'part']
+        distributions1 = [class_volumes, class_sum_eigenvalues, class_max_eigenvalues] + list(full_class_averages)
         # accuracies = [full_avg_class_accuracies, part_avg_class_accuracies][training == 'part']
         accuracies = full_avg_class_accuracies
         compare_metrics_to_class_accuracies(distributions[0], accuracies, num_classes, metric_abbreviations,
@@ -870,7 +872,7 @@ def main(dataset_name: str, model_type: str, ensemble_size: str, grayscale: bool
                                             dataset_name, grayscale, pca,
                                             f'{ensemble_size}_{model_type}_{training}{dataset_name}_fixed_hardPCC',
                                             f'{ensemble_size}_{model_type}_{training}{dataset_name}_fixed_hardSRC')
-        compare_metrics_to_class_accuracies(full_class_averages, accuracies, num_classes, metric_abbreviations,
+        compare_metrics_to_class_accuracies(distributions1, accuracies, num_classes, metric_abbreviations1,
                                             dataset_name, grayscale, pca,
                                             f'{ensemble_size}_{model_type}_{training}{dataset_name}_avgPCC',
                                             f'{ensemble_size}_{model_type}_{training}{dataset_name}_avgSRC')

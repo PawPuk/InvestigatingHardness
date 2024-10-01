@@ -70,9 +70,9 @@ class EnsembleTrainer:
         if self.save_dir == u.MODEL_SAVE_DIR:
             # Collect all trained models
             if ensemble_size == 'small':
-                total_models = 10 if self.dataset_name == 'CIFAR10' else 25
+                total_models = 10 if self.dataset_name in ['CIFAR10', 'SVHN'] else 25
             else:
-                total_models = 25 if self.dataset_name == 'CIFAR10' else 100
+                total_models = 25 if self.dataset_name in ['CIFAR10', 'SVHN'] else 100
             model_paths = self.get_all_trained_model_paths()[:total_models]
             class_accuracies = np.zeros((total_models, num_classes))  # Store class-level accuracies for all models
             total_accuracies = np.zeros(total_models)
@@ -84,6 +84,8 @@ class EnsembleTrainer:
                 # Evaluate the model on the test set
                 class_accuracies[idx] = u.class_level_test(model, test_loader, num_classes)
                 total_accuracies[idx] = u.test(model, test_loader) / 100
+                print(f'Class-level accuracies of model {idx} - {class_accuracies[idx]}')
+                print(f'Dataset-level accuracy of model {idx} - {total_accuracies[idx]}')
 
             # Save class accuracies
             class_accuracies_file = f"{u.METRICS_SAVE_DIR}{ensemble_size}_{self.training}{self.dataset_name}" \
@@ -103,10 +105,11 @@ class EnsembleTrainer:
         fig, ax = plt.subplots(figsize=(10, 6))  # Single figure for all class accuracies
 
         x_vals = range(1, running_avg_class_accuracies.shape[0] + 1)
-        std_accs = []
+        std_accs, mean_accs = [], []
         for class_idx in range(num_classes):
             mean_acc = running_avg_class_accuracies[:, class_idx]
             std_acc = running_std_class_accuracies[:, class_idx]
+            mean_accs.append(mean_acc)
             std_accs.append(std_acc)
 
             # Plot accuracy for each class
@@ -114,7 +117,8 @@ class EnsembleTrainer:
             # ax.fill_between(x_vals, mean_acc - std_acc, mean_acc + std_acc, alpha=0.1)
 
             # Print the final running standard deviation for each class
-            print(f"Final running standard deviation for Class {class_idx}: {std_acc[-1]:.4f}")
+            # print(f"Final running accuracy for Class {class_idx}: {mean_acc[-1]:.4f}")
+            # print(f"Final running standard deviation for Class {class_idx}: {std_acc[-1]:.4f}")
         print(f'Standard deviation of class-level standard deviations: {np.std(std_accs):.4f}')
 
         # Customize the plot
@@ -132,7 +136,9 @@ class EnsembleTrainer:
         plt.show()
 
         # Calculate and print the final running standard deviation for overall accuracy (total_accuracies)
+        total_accuracies_final_mean = total_accuracies.mean()
         total_accuracies_final_std = total_accuracies.std()
+        print(f"Final running average for total accuracy: {total_accuracies_final_mean:.4f}")
         print(f"Final running standard deviation for total accuracy: {total_accuracies_final_std:.4f}")
 
 
@@ -151,7 +157,7 @@ def main(dataset_name: str, models_count: int, training: str, model_type: str, e
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train an ensemble of models on the full dataset and save parameters.')
     parser.add_argument('--dataset_name', type=str, default='MNIST')
-    parser.add_argument('--models_count', type=int, default=20, help='Number of models to train in this run.')
+    parser.add_argument('--models_count', type=int, default=25, help='Number of models to train in this run.')
     parser.add_argument('--training', type=str, choices=['full', 'part'], default='full',
                         help='Indicates which models to choose for evaluations - the ones trained on the entire dataset'
                              ' (full), or the ones trained only on the training set (part).')

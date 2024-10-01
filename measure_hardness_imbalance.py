@@ -249,15 +249,8 @@ class HardnessImbalanceMeasurer:
     def measure_and_visualize_hardness_based_imbalance(self):
         """Test an ensemble of models on the dataset, returning accuracies for each metric."""
         accuracies, easy_accuracies, medium_accuracies, hard_accuracies = [], [], [], []
-        metric_abbreviations = [
-            'SameCentroidDist', 'Same1NNDist', 'AvgSame40NNDist',
-            'OtherCentroidDist', 'Other1NNDist', 'AvgOther40NNDist', '40NNPercSame', 'N3',
-            'CentroidDistRatio', '1NNRatioDist', 'Avg40NNDistRatio',
-            'AvgAll40NNDist',
-            'GaussCurv', 'MeanCurv',
-            'Cleanlab', 'EL2N', 'VoG', 'Margin'
-        ]
-        metric_abbreviations.pop(-2)
+        metric_abbreviations = ['DCC', 'MDSC', 'ADSC', 'DNOC', 'MDOC', 'ADOC', 'CP', 'N3', 'CDR', 'MDR', 'ADR', 'GC',
+                                'MC', 'Cleanlab', 'EL2N', 'Margins']
 
         accuracies_file = f'{u.ACCURACIES_SAVE_DIR}{self.ensemble_size}_{self.model_type}_{self.training}' \
                           f'{self.dataset_name}_accuracies.pkl'
@@ -314,7 +307,7 @@ if __name__ == "__main__":
                              ' (full), or the ones trained only on the training set (part).')
     parser.add_argument('--model_type', type=str, choices=['simple', 'complex'], default='complex',
                         help='Specifies the type of network used for training (MLP vs LeNet or ResNet20 vs ResNet56).')
-    parser.add_argument('--ensemble_size', type=str, choices=['small', 'large'], default='small',
+    parser.add_argument('--ensemble_size', type=str, choices=['small', 'large'], default='large',
                         help='Specifies the size of the ensembles to be used in the experiments.')
     parser.add_argument('--grayscale', action='store_true',
                         help='Raise to use grayscale transformation for CIFAR10 when computing Proximity metrics')
