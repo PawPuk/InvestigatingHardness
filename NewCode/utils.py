@@ -1,14 +1,13 @@
-import os
 import pickle
-from typing import List, Tuple, Union
+import random
+from typing import Tuple, Union
 
 import numpy as np
 from sklearn.decomposition import PCA
 import torch
-import torch.nn.functional as F
 from torch.optim import Adam, SGD
 from torch.optim.lr_scheduler import CosineAnnealingLR
-from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
+from torch.utils.data import TensorDataset
 from torchvision import datasets, transforms
 
 from neural_networks import LeNet, SimpleMLP
@@ -45,25 +44,21 @@ def load_data(filename: str):
         return pickle.load(f)
 
 
-def initialize_models(dataset_name: str, model_type: str):
+def initialize_models(dataset_name: str, model_type: str, width: int):
     if dataset_name == 'CIFAR10':
         # Create three instances of each model type with fresh initializations
         if model_type == 'simple':
             model = torch.hub.load("chenyaofo/pytorch-cifar-models", "cifar10_resnet20", pretrained=False).to(DEVICE)
         else:
             model = torch.hub.load("chenyaofo/pytorch-cifar-models", "cifar10_resnet56", pretrained=False).to(DEVICE)
-        optimizer = Adam(model.parameters(), lr=0.01, betas=(0.9, 0.999), weight_decay=1e-4)
+        optimizer = SGD(model.parameters(), lr=0.1, momentum=0.9, weight_decay=5e-4)
     else:
         if model_type == 'simple':
-            model = SimpleMLP().to(DEVICE)
+            model = SimpleMLP(width).to(DEVICE)
         else:
             model = LeNet().to(DEVICE)
         optimizer = Adam(model.parameters(), lr=0.001)
     return model, optimizer
-
-
-def calculate_mean_std(accuracies: List[float]) -> Tuple[float, float]:
-    return np.mean(accuracies), np.std(accuracies)
 
 
 def reduce_dimensionality(dataset_name: str, data: torch.Tensor, apply_pca: bool = False) -> torch.Tensor:
@@ -90,62 +85,15 @@ def reduce_dimensionality(dataset_name: str, data: torch.Tensor, apply_pca: bool
         return data  # Return data as is
 
 
-def load_full_data_and_normalize(dataset_name: str, to_grayscale: bool = False,
-                                 apply_pca: bool = False) -> TensorDataset:
-    """Loads and normalizes the full dataset (train + test). Optionally reduces dimensionality.
-
-    :param dataset_name: Name of the dataset to load.
-    :param to_grayscale: If True and dataset_name is 'CIFAR10', transforms images to grayscale.
-    :param apply_pca: Whether to apply PCA for dimensionality reduction.
-    :return: A TensorDataset containing the normalized data and targets.
-    """
-    # Load the train and test datasets
-    train_dataset = getattr(datasets, dataset_name)(root="./data", train=True, download=True)
-    test_dataset = getattr(datasets, dataset_name)(root="./data", train=False, download=True)
-
-    # Convert datasets into tensors
-    if dataset_name in ['CIFAR10', 'CIFAR100']:
-        train_data = torch.tensor(train_dataset.data).permute(0, 3, 1, 2).float()  # (N, H, W, C) -> (N, C, H, W)
-        test_data = torch.tensor(test_dataset.data).permute(0, 3, 1, 2).float()
-        if to_grayscale and dataset_name == 'CIFAR10':
-            train_data = train_data.mean(dim=1, keepdim=True)  # Convert to single channel
-            test_data = test_data.mean(dim=1, keepdim=True)    # Convert to single channel
-    else:
-        train_data = torch.tensor(train_dataset.data).unsqueeze(1).float()
-        test_data = torch.tensor(test_dataset.data).unsqueeze(1).float()
-
-    # Concatenate train and test data
-    full_data = torch.cat([train_data, test_data], dim=0)
-    full_targets = torch.cat([torch.tensor(train_dataset.targets), torch.tensor(test_dataset.targets)], dim=0)
-
-    # Reduce dimensionality if necessary
-    full_data = reduce_dimensionality(dataset_name, full_data, apply_pca=apply_pca)
-
-    # Normalize the data
-    if apply_pca and dataset_name in ['CIFAR10', 'CIFAR100']:
-        # Data is flattened to (N, 784) after PCA
-        mean = torch.mean(full_data, dim=0)
-        std = torch.std(full_data, dim=0) + EPSILON
-        normalized_full_data = (full_data - mean) / std
-    else:
-        # Data is in (N, C, H, W)
-        data_means = torch.mean(full_data, dim=(0, 2, 3)) / 255.0
-        data_stds = torch.sqrt(torch.var(full_data, dim=(0, 2, 3)) / 255.0 ** 2 + EPSILON)
-        # Apply normalization
-        normalize_transform = transforms.Normalize(mean=data_means, std=data_stds)
-        normalized_full_data = normalize_transform(full_data / 255.0)
-
-    return TensorDataset(normalized_full_data, full_targets)
-
-
 def load_data_and_normalize(dataset_name: str, to_grayscale: bool = False,
-                            apply_pca: bool = False) -> Tuple[TensorDataset, TensorDataset]:
+                            apply_pca: bool = False, label_noise: float = 0.0) -> Tuple[TensorDataset, TensorDataset]:
     """
-    Loads and normalizes the dataset. Optionally reduces dimensionality.
+    Loads and normalizes the dataset. Optionally reduces dimensionality and adds label noise.
 
     :param dataset_name: Name of the dataset to load.
     :param to_grayscale: If True and dataset_name is 'CIFAR10', it will transform images to grayscale.
     :param apply_pca: Whether to apply PCA for dimensionality reduction.
+    :param label_noise: Fraction of training labels to be randomly changed (0 to 1).
     :return: Two TensorDatasets - one for training data and another for test data.
     """
     # Load the train and test datasets
@@ -166,6 +114,10 @@ def load_data_and_normalize(dataset_name: str, to_grayscale: bool = False,
 
     train_targets = torch.as_tensor(train_dataset.targets)
     test_targets = torch.as_tensor(test_dataset.targets)
+
+    # Apply label noise to the training set
+    if label_noise > 0.0:
+        train_targets = add_label_noise(train_targets, noise_fraction=label_noise, num_classes=len(torch.unique(train_targets)))
 
     # Reduce dimensionality if necessary
     train_data = reduce_dimensionality(dataset_name, train_data, apply_pca=apply_pca)
@@ -190,137 +142,105 @@ def load_data_and_normalize(dataset_name: str, to_grayscale: bool = False,
     return TensorDataset(normalized_train_data, train_targets), TensorDataset(normalized_test_data, test_targets)
 
 
-def train(dataset_name: str, model: torch.nn.Module, loader, optimizer: Union[Adam, SGD],
-          epochs: int = EPOCHS):
-    # TODO: modify to save learning-based hardness metrics like forgetting or memorization
+def add_label_noise(targets: torch.Tensor, noise_fraction: float, num_classes: int) -> torch.Tensor:
+    """
+    Introduce label noise by changing a fraction of the labels to random incorrect labels.
+
+    :param targets: Original labels as a tensor.
+    :param noise_fraction: Fraction of labels to be randomly changed.
+    :param num_classes: Number of classes in the dataset.
+    :return: Tensor with noisy labels.
+    """
+    num_samples = len(targets)
+    num_noisy_samples = int(noise_fraction * num_samples)
+
+    # Randomly select a subset of indices to corrupt labels
+    noisy_indices = random.sample(range(num_samples), num_noisy_samples)
+
+    # Corrupt labels by randomly changing them to a different class
+    for idx in noisy_indices:
+        original_label = targets[idx].item()
+        new_label = original_label
+        while new_label == original_label:
+            new_label = random.randint(0, num_classes - 1)  # Random class different from the original
+        targets[idx] = new_label
+
+    return targets
+
+
+def train(dataset_name: str, model: torch.nn.Module, training_loader, test_loader, optimizer: Union[Adam, SGD],
+          epochs: int = 10):
     scheduler = CosineAnnealingLR(optimizer, T_max=epochs)
-    train_losses, accuracies = [], []
+    train_losses, train_accuracies, test_losses, test_accuracies = [], [], [], []
+
     for epoch in range(epochs):
         model.train()
         train_loss, correct = 0, 0
-        for data, target in loader:
+
+        for data, target in training_loader:
             inputs, labels = data.to(DEVICE), target.to(DEVICE)
             optimizer.zero_grad()
             outputs = model(inputs)
             loss = CRITERION(outputs, labels)
             loss.backward()
             optimizer.step()
+
             train_loss += loss.item()
             pred = outputs.argmax(dim=1, keepdim=True)
-            correct += pred.eq(target.view_as(pred)).sum().item()
+            correct += pred.eq(labels.view_as(pred)).sum().item()
+
+        test_loss, test_accuracy, _, _ = test(model, test_loader)
+
         if dataset_name == 'CIFAR10':
             scheduler.step()
-        train_losses.append(train_loss / len(loader.dataset))
-        accuracies.append(100. * correct / len(loader.dataset))
-    return train_losses, accuracies
+
+        train_losses.append(train_loss / len(training_loader.dataset))
+        train_accuracies.append(100. * correct / len(training_loader.dataset))
+        test_losses.append(test_loss)
+        test_accuracies.append(test_accuracy)
+
+    return train_losses, train_accuracies, test_losses, test_accuracies
 
 
-def class_level_test(model: torch.nn.Module, loader: DataLoader, num_classes: int) -> List[float]:
-    """Compute accuracy per class."""
-    correct_per_class = torch.zeros(num_classes, dtype=torch.long)
-    total_per_class = torch.zeros(num_classes, dtype=torch.long)
-
-    model.eval()
-    with torch.no_grad():
-        for data, target in loader:
-            data, target = data.to(DEVICE), target.to(DEVICE)
-            outputs = model(data)
-            _, predictions = torch.max(outputs, 1)
-            for i in range(num_classes):
-                correct_per_class[i] += (predictions[target == i] == i).sum().item()
-                total_per_class[i] += (target == i).sum().item()
-    accuracies = (correct_per_class.float() / total_per_class.float()).tolist()
-    return accuracies
-
-
-def test(model: torch.nn.Module, loader) -> Tuple[float, float]:
-    """Measures the accuracy of the 'model' on the test set.
+def test(model: torch.nn.Module, loader) -> Tuple[float, float, np.ndarray, np.ndarray]:
+    """
+    Measures the accuracy and loss per class on the test set.
 
     :param model: The model to evaluate.
     :param loader: DataLoader containing test data.
-    :return: Dictionary with accuracy on the test set rounded to 2 decimal places.
+    :return: Tuple containing overall test loss, test accuracy, class-level losses, and accuracies.
     """
     model.eval()
     test_loss, correct = 0, 0
+    class_correct = np.zeros(10)  # Assuming 10 classes
+    class_total = np.zeros(10)
+    class_losses = np.zeros(10)
+
     with torch.no_grad():
         for data, target in loader:
             data, target = data.to(DEVICE), target.to(DEVICE)
             outputs = model(data)
-            test_loss += F.cross_entropy(outputs, target).item()
-            _, predicted = torch.max(outputs.data, 1)  # Get the index of the max log-probability
+            batch_loss = CRITERION(outputs, target).item()
+
+            test_loss += batch_loss * data.size(0)
+            _, predicted = torch.max(outputs, 1)
             correct += predicted.eq(target.view_as(predicted)).sum().item()
+
+            # Gather class-wise statistics
+            for i in range(len(target)):
+                label = target[i].item()
+                pred_label = predicted[i].item()
+                class_correct[label] += (pred_label == label)
+                class_total[label] += 1
+                class_losses[label] += batch_loss
+
+    # Calculate overall test loss and accuracy
     test_loss /= len(loader.dataset)
     accuracy = 100. * correct / len(loader.dataset)
-    return test_loss, accuracy
 
+    # Compute class-level accuracies and losses
+    class_accuracies = 100. * class_correct / class_total
+    class_losses /= class_total
 
-def dataset_to_tensors(dataset: Dataset) -> Tuple[torch.Tensor, torch.Tensor]:
-    """
-    Converts a PyTorch Dataset (or Subset) into two Tensors: one for the data and one for the targets.
+    return test_loss, accuracy, class_losses, class_accuracies
 
-    :param dataset: The dataset to convert, can be a Dataset or Subset object.
-    :return: A tuple containing two tensors (data_tensor, target_tensor).
-    """
-    data_list, target_list = [], []
-    for data, target in dataset:
-        data_list.append(data.unsqueeze(0))  # Add an extra dimension to stack properly later
-        target_list.append(torch.tensor(target))
-    return torch.cat(data_list, dim=0), torch.tensor(target_list)
-
-
-def combine_and_split_data(hard_dataset: Subset, easy_dataset: Subset,
-                           dataset_name: str) -> Tuple[List[DataLoader], List[DataLoader]]:
-    """
-    Combines easy and hard data samples into a single dataset, then splits it into train and test sets while
-    maintaining the same easy:hard ratio in both splits and keeping the overall train:test ratio as defined.
-
-    :param hard_dataset: identified hard samples (Subset)
-    :param easy_dataset: identified easy samples (Subset)
-    :param dataset_name: name of the used dataset
-    :return: A list containing 2 training DataLoaders (for hard, easy), and 2 test loaders (for hard, easy, all data).
-    """
-    train_test_ratio = 6 / 7 if dataset_name == 'MNIST' else 5 / 6 if dataset_name == 'CIFAR10' else 8 / 10
-
-    # Convert Subsets into Tensors
-    hard_data, hard_target = dataset_to_tensors(hard_dataset)
-    easy_data, easy_target = dataset_to_tensors(easy_dataset)
-
-    # Randomly shuffle hard and easy samples
-    hard_perm, easy_perm = torch.randperm(hard_data.size(0)), torch.randperm(easy_data.size(0))
-    hard_data, hard_target = hard_data[hard_perm], hard_target[hard_perm]
-    easy_data, easy_target = easy_data[easy_perm], easy_target[easy_perm]
-
-    # Calculate the number of training and test samples
-    train_size_hard = int(len(hard_data) * train_test_ratio)
-    train_size_easy = int(len(easy_data) * train_test_ratio)
-
-    # Split hard and easy samples into training and test sets
-    hard_train_data, hard_test_data = hard_data[:train_size_hard], hard_data[train_size_hard:]
-    hard_train_target, hard_test_target = hard_target[:train_size_hard], hard_target[train_size_hard:]
-    easy_train_data, easy_test_data = easy_data[:train_size_easy], easy_data[train_size_easy:]
-    easy_train_target, easy_test_target = easy_target[:train_size_easy], easy_target[train_size_easy:]
-
-    # Combine easy and hard samples into full training and test data
-    train_data = torch.cat((hard_train_data, easy_train_data), dim=0)
-    train_targets = torch.cat((hard_train_target, easy_train_target), dim=0)
-    test_data = torch.cat((hard_test_data, easy_test_data), dim=0)
-    test_targets = torch.cat((hard_test_target, easy_test_target), dim=0)
-
-    # Shuffle the full training split
-    train_permutation = torch.randperm(train_data.size(0))
-    train_data, train_targets = train_data[train_permutation], train_targets[train_permutation]
-
-    # Create DataLoaders for full, hard-only, full easy, and easy subset training sets
-    train_loaders = [
-        DataLoader(TensorDataset(hard_train_data, hard_train_target), batch_size=BATCH_SIZE, shuffle=True),  # Hard-only
-        DataLoader(TensorDataset(easy_train_data, easy_train_target), batch_size=BATCH_SIZE, shuffle=True),  # Easy-only
-    ]
-
-    # Create DataLoaders for the test sets (hard, easy, all)
-    test_loaders = [
-        DataLoader(TensorDataset(hard_test_data, hard_test_target), batch_size=len(hard_test_data)),  # Hard test set
-        DataLoader(TensorDataset(easy_test_data, easy_test_target), batch_size=len(easy_test_data)),  # Easy test set
-        DataLoader(TensorDataset(test_data, test_targets), batch_size=len(test_data))  # Full test set
-    ]
-
-    return train_loaders, test_loaders

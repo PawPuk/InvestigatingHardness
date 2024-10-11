@@ -26,14 +26,14 @@ class LeNet(nn.Module):
 
 
 class SimpleMLP(nn.Module):
-    def __init__(self):
+    def __init__(self, width: int):
         super(SimpleMLP, self).__init__()
         self.fc = nn.Sequential(
-            nn.Linear(28*28, 20),
+            nn.Linear(28*28, width),
             nn.ReLU(),
-            nn.Linear(20, 20),
+            nn.Linear(width, width),
             nn.ReLU(),
-            nn.Linear(20, 10)
+            nn.Linear(width, 10)
         )
 
     def forward(self, x):
